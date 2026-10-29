@@ -1017,27 +1017,72 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
     }
     rev = { name: "'65 SPRING", cat: "REV", params: { Decay: (2.8 + avgTreble * 4).toFixed(1), Level: "3.2" }, desc: "Spring ambience for clean attack." };
   } else if (isLeadSection) {
-    amp = isHeavyProfile ? "SUPER HEAVY" : "80S ROCK";
-    gain = isHeavyProfile ? 7.4 : 6.6;
-    crestFactor = isHeavyProfile ? 6.8 : 8.4;
-    distDesc = isHeavyProfile ? "Saturated Lead / Sustain" : "Lead Overdrive / Sustain";
-    tonePot = isSquier ? "8.2" : "7.8";
-    stomp = isHeavyProfile
-      ? { name: "MYTH DRIVE", cat: "STOMP", params: { Gain: "1.2", Level: "8.2", Tone: "6.0" }, desc: "Tight boost for sustained high-gain lead." }
-      : { name: "BLUES DRIVE", cat: "STOMP", params: { Gain: "3.0", Level: "7.2", Tone: "5.8" }, desc: "Mid-focused lead boost." };
-    delay = { name: "DIGITAL DELAY", cat: "DELAY", params: { Time: isHeavyProfile ? "280ms" : "420ms", Feedback: isHeavyProfile ? "2.5" : "4.0", Level: isHeavyProfile ? "2.4" : "3.8" }, desc: "Lead sustain and phrase definition." };
-    rev = { name: "SMALL HALL", cat: "REV", params: { Decay: "3.2", Level: "2.6" }, desc: "Controlled ambience for lead notes." };
-    if (loudnessCv > 0.5 && avgTreble > 0.25) {
+    // Lead sections need their own profile test: isHeavyProfile intentionally
+    // excludes solos, so using it here made every ordinary solo identical.
+    const leadHighGain = avgBass > 0.27 && avgUpperMid > 0.145 && avgIntensity > 72;
+    const leadVintage = avgUpperMid > 0.19 && avgTreble < 0.29 && loudnessCv > 0.28;
+    const leadBright = avgTreble > 0.30 || avgCentroid > 3300;
+    const leadDark = avgTreble < 0.19 || avgCentroid < 2100;
+    const leadDynamic = loudnessCv > 0.48;
+
+    if (leadHighGain && leadBright) amp = "SUPER HEAVY";
+    else if (leadHighGain) amp = "ALT METAL";
+    else if (leadVintage) amp = "70S ROCK";
+    else if (leadDark) amp = "BURN";
+    else if (leadBright) amp = "90S ROCK";
+    else amp = "80S ROCK";
+
+    gain = Math.max(4.2, Math.min(9.0,
+      (amp === "SUPER HEAVY" || amp === "ALT METAL" ? 7.2 : amp === "70S ROCK" ? 5.4 : 6.0)
+      + avgTreble * 2.8 + avgUpperMid * 2.2 + (avgIntensity > 90 ? 0.3 : 0)
+    ));
+    crestFactor = (leadHighGain ? 6.2 : 8.0) + Math.min(2.0, loudnessCv * 2.2);
+    distDesc = leadHighGain ? "High-Gain Lead / Sustain" : leadVintage ? "Vintage Mid-Focused Lead" : leadBright ? "Bright Articulate Lead" : "Warm Singing Lead";
+    tonePot = isSquier ? (leadBright ? "7.6" : "8.5") : (leadBright ? "7.2" : "8.0");
+
+    if (leadHighGain) {
+      stomp = { name: "MYTH DRIVE", cat: "STOMP", params: { Gain: "1.0", Level: (8.0 + avgUpperMid * 2).toFixed(1), Tone: (5.4 + avgTreble * 3).toFixed(1) }, desc: "Tight boost for a high-gain lead." };
+    } else if (leadVintage || leadDark) {
+      stomp = { name: "BLUES DRIVE", cat: "STOMP", params: { Gain: (2.6 + avgIntensity / 100).toFixed(1), Level: (7.0 + avgUpperMid * 2).toFixed(1), Tone: (5.2 + avgTreble * 3).toFixed(1) }, desc: "Mid-focused drive for a rounded lead tone." };
+    } else {
+      stomp = { name: "GREEN BOX", cat: "STOMP", params: { Gain: "2.2", Level: (7.4 + avgUpperMid * 2).toFixed(1), Tone: (5.8 + avgTreble * 2).toFixed(1) }, desc: "Focused overdrive for clear lead articulation." };
+    }
+
+    if (leadDynamic && leadBright) {
+      delay = { name: "ANALOG DELAY", cat: "DELAY", params: { Time: "280ms", Feedback: "2.2", Level: "2.0" }, desc: "Short, subtle repeats for a lively bright lead." };
+    } else if (leadHighGain) {
+      delay = { name: "DIGITAL DELAY", cat: "DELAY", params: { Time: "300ms", Feedback: "2.6", Level: "2.5" }, desc: "Controlled repeats that preserve high-gain note definition." };
+    } else {
+      delay = { name: "DIGITAL DELAY", cat: "DELAY", params: { Time: (340 + Math.round(avgTreble * 240)) + "ms", Feedback: (2.6 + avgMid * 2.2).toFixed(1), Level: (2.2 + avgIntensity / 65).toFixed(1) }, desc: "Lead repeats scaled to the measured tonal balance." };
+    }
+
+    if (leadDynamic && leadBright) {
       mod = { name: "PHASER", cat: "MOD", params: { Rate: "1.8", Depth: "3.0", Level: "2.5" }, desc: "Subtle motion for a bright, dynamic lead." };
+    } else if (leadDark || leadVintage) {
+      mod = { name: "CHORUS", cat: "MOD", params: { Rate: "1.5", Depth: "3.2", Level: "2.8" }, desc: "Gentle width for a warmer lead sound." };
+    }
+
+    if (leadHighGain) {
+      rev = { name: "SMALL ROOM", cat: "REV", params: { Decay: "1.9", Level: "1.8" }, desc: "Short ambience to keep high-gain leads defined." };
+    } else if (leadBright) {
+      rev = { name: "'65 SPRING", cat: "REV", params: { Decay: "2.6", Level: "2.8" }, desc: "Spring-style space for a bright lead." };
+    } else {
+      rev = { name: "SMALL HALL", cat: "REV", params: { Decay: (2.5 + avgMid * 2.1).toFixed(1), Level: (2.2 + avgIntensity / 90).toFixed(1) }, desc: "Moderate ambience for a rounded lead tone." };
     }
   } else if (isHeavyProfile) {
-    amp = "SUPER HEAVY";
-    gain = Math.max(7.2, Math.min(9.0, 7.3 + avgTreble * 3.2 + (avgIntensity > 90 ? 0.3 : 0)));
+    const veryBrightHeavy = avgTreble > 0.32 || avgCentroid > 3600;
+    const darkHeavy = avgTreble < 0.22 || avgCentroid < 2400;
+    amp = veryBrightHeavy ? "METAL 2000" : darkHeavy ? "DOOM METAL" : "SUPER HEAVY";
+    gain = Math.max(6.8, Math.min(9.2, 7.0 + avgTreble * 3.0 + avgUpperMid * 2.0 + (avgIntensity > 90 ? 0.3 : 0)));
     crestFactor = 5.5 + Math.min(1.4, loudnessCv * 2);
-    distDesc = "High-Gain / Tight Rhythm";
-    tonePot = isSquier ? "7.8" : "7.0";
-    stomp = { name: "MYTH DRIVE", cat: "STOMP", params: { Gain: "1.2", Level: "8.5", Tone: (5.6 + avgTreble * 3).toFixed(1) }, desc: "Tight boost in front of the high-gain amp." };
-    rev = { name: "SMALL ROOM", cat: "REV", params: { Decay: "1.8", Level: "1.5" }, desc: "Short ambience keeps palm-muted riffs tight." };
+    distDesc = veryBrightHeavy ? "Bright Modern Metal Rhythm" : darkHeavy ? "Dark, Thick High-Gain Rhythm" : "High-Gain / Tight Rhythm";
+    tonePot = isSquier ? (veryBrightHeavy ? "6.8" : "7.8") : (veryBrightHeavy ? "6.3" : "7.0");
+    stomp = darkHeavy
+      ? { name: "BLUES DRIVE", cat: "STOMP", params: { Gain: "1.8", Level: "7.8", Tone: "5.0" }, desc: "Low-gain mid push to define a darker high-gain sound." }
+      : { name: "MYTH DRIVE", cat: "STOMP", params: { Gain: "1.2", Level: "8.5", Tone: (5.3 + avgTreble * 3).toFixed(1) }, desc: "Tight boost in front of the high-gain amp." };
+    rev = darkHeavy
+      ? { name: "SMALL HALL", cat: "REV", params: { Decay: "2.2", Level: "2.0" }, desc: "Slightly fuller ambience for a thick, sustained riff." }
+      : { name: "SMALL ROOM", cat: "REV", params: { Decay: "1.8", Level: "1.5" }, desc: "Short ambience keeps palm-muted riffs tight." };
   } else {
     amp = "80S ROCK";
     gain = Math.max(4.8, Math.min(7.8, 5.0 + avgTreble * 4.5 + avgUpperMid * 3));
