@@ -309,8 +309,11 @@ body{
     </div>
     <div class="gear-card">
       <small>Active Amplifier</small>
-      <div class="gear-select" aria-label="Active amplifier">Fender Mustang LT40S (Stereo 40W)</div>
-      <p id="ampDesc">Dual 4" full-range stereo speakers. Tight desktop response.</p>
+      <select class="gear-select" id="ampSelect" aria-label="Active amplifier">
+        <option value="lt40s" selected>Fender Mustang LT40S (Stereo 40W)</option>
+        <option value="lt25">Fender Mustang LT25 (25W)</option>
+      </select>
+      <p id="ampDesc">Dual 4&quot; full-range stereo speakers. Tight desktop response.</p>
     </div>
   </section>
 
@@ -505,20 +508,23 @@ body{
 const LT_AMPS = {
   "50S TWIN":     { basedOn: "1957 Fender Twin Tweed" },
   "60S UK CLN":   { basedOn: "Vox AC30 Top Boost" },
-  "70S ROCK":     { basedOn: "Marshall Super Lead 1959 Plexi" },
+  "70S ROCK":     { basedOn: "Late-60s/early-70s Marshall Super Lead" },
   "70S UK CLN":   { basedOn: "Hiwatt DR103" },
-  "80S ROCK":     { basedOn: "Marshall JCM800 2203" },
+  "80S ROCK":     { basedOn: "Marshall JCM800" },
   "90S ROCK":     { basedOn: "Mesa/Boogie Dual Rectifier" },
-  "BASSMAN":      { basedOn: "1959 Fender Bassman 4x10" },
+  "BASSMAN":      { basedOn: "1959 Fender Bassman" },
   "BURN":         { basedOn: "Fender Super-Sonic Burn Channel" },
-  "CHAMP":        { basedOn: "1957 Tweed Champ 5W" },
+  "CHAMP":        { basedOn: "1957 Fender Champ" },
   "DELUXE CLN":   { basedOn: "1965 Fender Deluxe Reverb" },
-  "DELUXE DIRT":  { basedOn: "1957 Tweed Deluxe 5E3" },
+  "DELUXE DIRT":  { basedOn: "1957 Fender Deluxe" },
   "DOOM METAL":   { basedOn: "Orange OR120" },
-  "ALT METAL":    { basedOn: "Mesa Dual Rectifier (Gated Modern)" },
-  "METAL 2000":   { basedOn: "EVH 5150III High Gain" },
-  "SUPER CLEAN":  { basedOn: "Direct Studio Preamp" },
-  "SUPER HEAVY":  { basedOn: "EVH 5150III (Gated Scorch)" },
+  "EXCELSIOR":    { basedOn: "Fender Excelsior" },
+  "ALT METAL":    { basedOn: "Mesa Dual Rectifier (gated high gain)" },
+  "METAL 2000":   { basedOn: "EVH 5150III high gain" },
+  "PRINCETON":    { basedOn: "1965 Fender Princeton" },
+  "SMALLTONE":    { basedOn: "1960s Sears Silvertone" },
+  "SUPER CLEAN":  { basedOn: "Direct studio preamp" },
+  "SUPER HEAVY":  { basedOn: "EVH 5150III (gated high gain)" },
   "TWIN CLEAN":   { basedOn: "1965 Fender Twin Reverb" }
 };
 
@@ -572,6 +578,14 @@ document.getElementById('guitarSelect').addEventListener('change', () => {
   document.getElementById('guitarDesc').textContent = isSquier
     ? "Fender-Designed Alnico pickups (vintage warmth). Master Volume, Tone 1 (Neck/Mid), Tone 2 (Bridge)."
     : "Ceramic bridge humbucker, single-coil middle & neck. Master Volume & single Master Tone knob.";
+  if (currentPreset) startAiStreamAndListen();
+});
+
+document.getElementById('ampSelect').addEventListener('change', () => {
+  const ampType = document.getElementById('ampSelect').value;
+  document.getElementById('ampDesc').textContent = ampType === 'lt25'
+    ? 'Single 8" speaker. Compact 25W combo response.'
+    : 'Dual 4" full-range stereo speakers. Tight desktop response.';
   if (currentPreset) startAiStreamAndListen();
 });
 
@@ -695,7 +709,7 @@ async function startAiStreamAndListen() {
     if (audioCtx.state === 'suspended') await audioCtx.resume();
 
     analyserNode = audioCtx.createAnalyser();
-    analyserNode.fftSize = 512;
+    analyserNode.fftSize = 2048;
     try {
       sourceNode = audioCtx.createMediaElementSource(globalAudio);
       sourceNode.connect(analyserNode);
@@ -819,7 +833,7 @@ document.getElementById('directFileInput').addEventListener('change', async (e) 
     if (audioCtx.state === 'suspended') await audioCtx.resume();
 
     analyserNode = audioCtx.createAnalyser();
-    analyserNode.fftSize = 512;
+    analyserNode.fftSize = 2048;
 
     const fileUrl = URL.createObjectURL(file);
     globalAudio = new Audio();
@@ -942,7 +956,7 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
       if (hz >= 1200 && hz < 3500) upperMid += value;
     }
     const total = bass + mid + treble || 1;
-    const loudness = weight / frame.length;
+    const loudness = weight / Math.max(1, frame.length / 4);
     frameLoudness.push(loudness);
     return {
       bass: bass / total,
@@ -991,7 +1005,7 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
   const noMod = { name: "NONE", cat: "MOD", params: {}, desc: "Bypassed." };
   const noDelay = { name: "NONE", cat: "DELAY", params: {}, desc: "Bypassed." };
   const guitarType = document.getElementById('guitarSelect').value;
-  const ampType = 'lt40s';
+  const ampType = document.getElementById('ampSelect').value;
   const isSquier = guitarType === "cv70s";
   const isLT25 = ampType === "lt25";
   pickup = "Position 1 — Bridge Humbucker";
@@ -1013,9 +1027,9 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
       mod = { name: "CHORUS", cat: "MOD", params: { Rate: "2.4", Depth: "5.2", Level: "4.5" }, desc: "Subtle movement for spacious clean passages." };
     }
     if (avgCentroid > 3000) {
-      delay = { name: "DIGITAL DELAY", cat: "DELAY", params: { Time: "300ms", Feedback: "2.8", Level: "2.5" }, desc: "Low-mix repeats for clear clean phrases." };
+      delay = { name: "DELAY", cat: "DELAY", params: { Time: "300ms", Feedback: "2.8", Level: "2.5" }, desc: "Low-mix repeats for clear clean phrases." };
     }
-    rev = { name: "'65 SPRING", cat: "REV", params: { Decay: (2.8 + avgTreble * 4).toFixed(1), Level: "3.2" }, desc: "Spring ambience for clean attack." };
+    rev = { name: "SPRING 65", cat: "REV", params: { Decay: (2.8 + avgTreble * 4).toFixed(1), Level: "3.2" }, desc: "Spring ambience for clean attack." };
   } else if (isLeadSection) {
     // Lead sections need their own profile test: isHeavyProfile intentionally
     // excludes solos, so using it here made every ordinary solo identical.
@@ -1045,15 +1059,15 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
     } else if (leadVintage || leadDark) {
       stomp = { name: "BLUES DRIVE", cat: "STOMP", params: { Gain: (2.6 + avgIntensity / 100).toFixed(1), Level: (7.0 + avgUpperMid * 2).toFixed(1), Tone: (5.2 + avgTreble * 3).toFixed(1) }, desc: "Mid-focused drive for a rounded lead tone." };
     } else {
-      stomp = { name: "GREEN BOX", cat: "STOMP", params: { Gain: "2.2", Level: (7.4 + avgUpperMid * 2).toFixed(1), Tone: (5.8 + avgTreble * 2).toFixed(1) }, desc: "Focused overdrive for clear lead articulation." };
+      stomp = { name: "OVERDRIVE", cat: "STOMP", params: { Gain: "2.2", Level: (7.4 + avgUpperMid * 2).toFixed(1), Tone: (5.8 + avgTreble * 2).toFixed(1) }, desc: "Focused overdrive for clear lead articulation." };
     }
 
     if (leadDynamic && leadBright) {
-      delay = { name: "ANALOG DELAY", cat: "DELAY", params: { Time: "280ms", Feedback: "2.2", Level: "2.0" }, desc: "Short, subtle repeats for a lively bright lead." };
+      delay = { name: "ECHO", cat: "DELAY", params: { Time: "280ms", Feedback: "2.2", Level: "2.0" }, desc: "Short, subtle repeats for a lively bright lead." };
     } else if (leadHighGain) {
-      delay = { name: "DIGITAL DELAY", cat: "DELAY", params: { Time: "300ms", Feedback: "2.6", Level: "2.5" }, desc: "Controlled repeats that preserve high-gain note definition." };
+      delay = { name: "DELAY", cat: "DELAY", params: { Time: "300ms", Feedback: "2.6", Level: "2.5" }, desc: "Controlled repeats that preserve high-gain note definition." };
     } else {
-      delay = { name: "DIGITAL DELAY", cat: "DELAY", params: { Time: (340 + Math.round(avgTreble * 240)) + "ms", Feedback: (2.6 + avgMid * 2.2).toFixed(1), Level: (2.2 + avgIntensity / 65).toFixed(1) }, desc: "Lead repeats scaled to the measured tonal balance." };
+      delay = { name: "DELAY", cat: "DELAY", params: { Time: (340 + Math.round(avgTreble * 240)) + "ms", Feedback: (2.6 + avgMid * 2.2).toFixed(1), Level: (2.2 + avgIntensity / 65).toFixed(1) }, desc: "Lead repeats scaled to the measured tonal balance." };
     }
 
     if (leadDynamic && leadBright) {
@@ -1065,9 +1079,9 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
     if (leadHighGain) {
       rev = { name: "SMALL ROOM", cat: "REV", params: { Decay: "1.9", Level: "1.8" }, desc: "Short ambience to keep high-gain leads defined." };
     } else if (leadBright) {
-      rev = { name: "'65 SPRING", cat: "REV", params: { Decay: "2.6", Level: "2.8" }, desc: "Spring-style space for a bright lead." };
+      rev = { name: "SPRING 65", cat: "REV", params: { Decay: "2.6", Level: "2.8" }, desc: "Spring-style space for a bright lead." };
     } else {
-      rev = { name: "SMALL HALL", cat: "REV", params: { Decay: (2.5 + avgMid * 2.1).toFixed(1), Level: (2.2 + avgIntensity / 90).toFixed(1) }, desc: "Moderate ambience for a rounded lead tone." };
+      rev = { name: "LARGE HALL", cat: "REV", params: { Decay: (2.5 + avgMid * 2.1).toFixed(1), Level: (2.2 + avgIntensity / 90).toFixed(1) }, desc: "Moderate ambience for a rounded lead tone." };
     }
   } else if (isHeavyProfile) {
     const veryBrightHeavy = avgTreble > 0.32 || avgCentroid > 3600;
@@ -1081,7 +1095,7 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
       ? { name: "BLUES DRIVE", cat: "STOMP", params: { Gain: "1.8", Level: "7.8", Tone: "5.0" }, desc: "Low-gain mid push to define a darker high-gain sound." }
       : { name: "MYTH DRIVE", cat: "STOMP", params: { Gain: "1.2", Level: "8.5", Tone: (5.3 + avgTreble * 3).toFixed(1) }, desc: "Tight boost in front of the high-gain amp." };
     rev = darkHeavy
-      ? { name: "SMALL HALL", cat: "REV", params: { Decay: "2.2", Level: "2.0" }, desc: "Slightly fuller ambience for a thick, sustained riff." }
+      ? { name: "LARGE HALL", cat: "REV", params: { Decay: "2.2", Level: "2.0" }, desc: "Slightly fuller ambience for a thick, sustained riff." }
       : { name: "SMALL ROOM", cat: "REV", params: { Decay: "1.8", Level: "1.5" }, desc: "Short ambience keeps palm-muted riffs tight." };
   } else {
     amp = "80S ROCK";
@@ -1089,16 +1103,101 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
     crestFactor = 7.2 + Math.min(1.4, loudnessCv * 2.2);
     distDesc = avgIntensity < 55 ? "Open Crunch / Dynamic Attack" : "Rock Crunch / Overdrive";
     tonePot = isSquier ? "8.6" : "8.0";
-    stomp = { name: avgUpperMid > 0.17 ? "BLUES DRIVE" : "GREEN BOX", cat: "STOMP", params: avgUpperMid > 0.17
+    stomp = { name: avgUpperMid > 0.17 ? "BLUES DRIVE" : "OVERDRIVE", cat: "STOMP", params: avgUpperMid > 0.17
       ? { Gain: "3.2", Level: "7.5", Tone: "5.8" }
       : { Gain: "2.6", Level: "7.8", Tone: "6.2" }, desc: "Moderate overdrive with a defined midrange." };
     if (avgCentroid < 2200 || avgTreble < 0.18) {
       mod = { name: "CHORUS", cat: "MOD", params: { Rate: "1.6", Depth: "3.8", Level: "3.0" }, desc: "Low-depth chorus for a darker, wider rhythm sound." };
     }
     if (avgCentroid > 2700 && loudnessCv > 0.35) {
-      delay = { name: "ANALOG DELAY", cat: "DELAY", params: { Time: "260ms", Feedback: "2.4", Level: "2.2" }, desc: "Subtle slap/space for articulate rock phrases." };
+      delay = { name: "ECHO", cat: "DELAY", params: { Time: "260ms", Feedback: "2.4", Level: "2.2" }, desc: "Subtle slap/space for articulate rock phrases." };
     }
-    rev = { name: "SMALL HALL", cat: "REV", params: { Decay: (2.2 + avgMid * 2).toFixed(1), Level: "2.4" }, desc: "Short hall ambience for rhythm definition." };
+    rev = { name: "LARGE HALL", cat: "REV", params: { Decay: (2.2 + avgMid * 2).toFixed(1), Level: "2.4" }, desc: "Short hall ambience for rhythm definition." };
+  }
+
+  // Final audio-driven FX pass. Every model name below is from the official
+  // Mustang LT25/LT40S effect lists; the manuals share these effect labels. Choices are deterministic and use measured
+  // spectrum/dynamics; only supported LT40S effect labels are used.
+  if (!isCleanSection) {
+    const darkTone = avgTreble < 0.235 || avgCentroid < 2550;
+    const brightTone = avgTreble > 0.285 || avgCentroid > 3150;
+    const midForward = avgUpperMid > 0.175;
+    const dynamicPerformance = loudnessCv > 0.38;
+    const denseMix = avgIntensity > 82 && loudnessCv < 0.30;
+    const bassHeavy = avgBass > 0.30;
+    const highGainTone = isHeavyProfile || (isLeadSection && avgIntensity > 78 && bassHeavy);
+
+    // STOMP: choose among all listed Mustang LT25/LT40S stompbox models.
+    if (highGainTone && denseMix) {
+      stomp = { name: "METAL GATE", cat: "STOMP", params: { Threshold: (4.0 + avgIntensity / 30).toFixed(1), Level: "5.5" }, desc: "Noise-gate option for a dense, high-gain sound." };
+    } else if (highGainTone && darkTone) {
+      stomp = { name: "MYTH DRIVE", cat: "STOMP", params: { Gain: "1.4", Level: (7.4 + avgUpperMid * 2).toFixed(1), Tone: (4.8 + avgTreble * 3).toFixed(1) }, desc: "Low-gain boost for a darker high-gain tone." };
+    } else if (highGainTone && brightTone) {
+      stomp = { name: "ROCK DIRT", cat: "STOMP", params: { Gain: (4.8 + avgIntensity / 40).toFixed(1), Level: "6.5", Tone: (5.0 + avgTreble * 3).toFixed(1) }, desc: "More assertive distortion for a bright, aggressive part." };
+    } else if (avgBass > 0.34 && avgTreble > 0.28) {
+      stomp = { name: "OCTOBOT", cat: "STOMP", params: { Octave: "4.5", Fuzz: "5.5", Level: "5.5" }, desc: "Octave-and-fuzz character for a strong low/high-frequency mix." };
+    } else if (avgIntensity < 58 || loudnessCv > 0.58) {
+      stomp = { name: "COMPRESSOR", cat: "STOMP", params: { Level: "6.5", Sensitivity: (3.8 + loudnessCv * 2).toFixed(1) }, desc: "Compression to even out a quieter or highly dynamic part." };
+    } else if (avgTreble > 0.34 && avgBass < 0.22) {
+      stomp = { name: "FUZZ", cat: "STOMP", params: { Gain: (5.0 + avgIntensity / 35).toFixed(1), Level: "5.8", Tone: "6.0" }, desc: "Fuzz for a bright, cutting texture." };
+    } else if (avgBass > 0.32 && avgUpperMid < 0.15) {
+      stomp = { name: "BIG FUZZ", cat: "STOMP", params: { Gain: "6.2", Level: "5.5", Tone: "4.8" }, desc: "Fuller fuzz character for a bass-heavy, less mid-forward sound." };
+    } else if (dynamicPerformance && midForward) {
+      stomp = { name: "SUSTAIN", cat: "STOMP", params: { Sustain: (5.0 + loudnessCv * 2).toFixed(1), Level: "5.8" }, desc: "Strong sustain for expressive, dynamically varied phrases." };
+    } else if (brightTone && !highGainTone) {
+      stomp = { name: "5-BAND EQ", cat: "STOMP", params: { Low: "4.5", LowMid: "5.0", Mid: "5.8", HighMid: "5.8", High: (5.0 + avgTreble * 2).toFixed(1) }, desc: "Graphic EQ option for shaping a bright, articulate tone." };
+    } else if (midForward) {
+      stomp = { name: "BLUES DRIVE", cat: "STOMP", params: { Gain: (2.2 + avgIntensity / 90).toFixed(1), Level: (7.0 + avgUpperMid * 2.5).toFixed(1), Tone: (4.8 + avgTreble * 3.5).toFixed(1) }, desc: "Mid-focused overdrive for added definition." };
+    } else {
+      stomp = { name: "OVERDRIVE", cat: "STOMP", params: { Gain: (2.0 + avgTreble * 3).toFixed(1), Level: "7.2", Tone: (5.0 + avgTreble * 2.5).toFixed(1) }, desc: "General-purpose overdrive for a moderate crunch." };
+    }
+
+    // MODULATION: all listed LT25/LT40S modulation models are represented in the decision tree.
+    if (dynamicPerformance && brightTone && avgTreble > 0.32) {
+      mod = { name: "FLANGER", cat: "MOD", params: { Rate: (1.2 + loudnessCv).toFixed(1), Depth: (3.0 + avgTreble * 3).toFixed(1), Level: "2.5" }, desc: "Flanging for a bright, moving texture." };
+    } else if (darkTone && bassHeavy) {
+      mod = { name: "VIBRATONE", cat: "MOD", params: { Rate: (1.2 + avgBass * 2).toFixed(1), Depth: "3.5", Level: "2.8" }, desc: "Rotary-speaker-style movement for a darker, bass-heavy part." };
+    } else if (midForward && avgTreble > 0.24 && loudnessCv > 0.25) {
+      mod = { name: "PHASER", cat: "MOD", params: { Rate: (1.2 + avgUpperMid * 3).toFixed(1), Depth: (2.0 + avgUpperMid * 5).toFixed(1), Level: "2.2" }, desc: "Phasing to add movement without masking the mids." };
+    } else if (avgCentroid > 3000 && avgIntensity < 72) {
+      mod = { name: "TOUCH WAH", cat: "MOD", params: { Sensitivity: (5.0 + avgTreble * 3).toFixed(1), Level: "3.0" }, desc: "Picking-responsive wah character for a light, articulate part." };
+    } else if (dynamicPerformance && avgUpperMid < 0.16) {
+      mod = { name: "TREMOLO", cat: "MOD", params: { Rate: (2.0 + loudnessCv * 2).toFixed(1), Depth: "3.2", Level: "2.8" }, desc: "Pulsing tremolo for a rhythmically dynamic part." };
+    } else if (avgCentroid > 2500 && avgTreble < 0.31) {
+      mod = { name: "STEP FILTER", cat: "MOD", params: { Rate: (1.5 + avgMid * 2).toFixed(1), Sensitivity: "4.5", Level: "2.5" }, desc: "Choppy filter movement for a midrange-focused sound." };
+    } else if (darkTone || isLeadSection || section.includes('intro')) {
+      mod = { name: "CHORUS", cat: "MOD", params: { Rate: (1.1 + avgBass * 2).toFixed(1), Depth: (2.4 + avgBass * 4).toFixed(1), Level: "2.6" }, desc: "Subtle chorus to widen the part." };
+    } else {
+      mod = noMod;
+    }
+
+    // DELAY: use the exact LT40S names DELAY, REVERSE and ECHO.
+    if (dynamicPerformance && brightTone && avgCentroid > 3000) {
+      delay = { name: "ECHO", cat: "DELAY", params: { Time: (220 + Math.round(avgTreble * 180)) + "ms", Feedback: (1.8 + loudnessCv * 1.4).toFixed(1), Level: (1.6 + avgUpperMid * 3).toFixed(1) }, desc: "Tape-style echo for a bright, dynamic phrase." };
+    } else if (isLeadSection && avgUpperMid > 0.18 && avgIntensity > 70) {
+      delay = { name: "REVERSE", cat: "DELAY", params: { Time: (300 + Math.round(avgMid * 160)) + "ms", Feedback: (1.8 + avgMid * 1.5).toFixed(1), Level: "2.0" }, desc: "Reverse repeats for a distinctive lead texture." };
+    } else if (denseMix || (bassHeavy && avgTreble < 0.27)) {
+      delay = noDelay;
+    } else if (isLeadSection || midForward || avgCentroid > 2450) {
+      delay = { name: "DELAY", cat: "DELAY", params: { Time: (300 + Math.round(avgMid * 180)) + "ms", Feedback: (1.8 + avgMid * 2.2).toFixed(1), Level: (1.6 + avgIntensity / 90).toFixed(1) }, desc: "Clean repeats to support note sustain." };
+    } else {
+      delay = { name: "ECHO", cat: "DELAY", params: { Time: (190 + Math.round(avgBass * 180)) + "ms", Feedback: "1.8", Level: "1.8" }, desc: "Low-feedback tape echo for depth without clutter." };
+    }
+
+    // REVERB: all five LT25/LT40S reverb models are available across different profiles.
+    if (denseMix) {
+      rev = { name: "SMALL ROOM", cat: "REV", params: { Decay: (1.4 + avgTreble * 2).toFixed(1), Level: (1.2 + avgUpperMid * 2).toFixed(1) }, desc: "Tight room ambience for a dense mix." };
+    } else if (brightTone && dynamicPerformance) {
+      rev = { name: "SPRING 65", cat: "REV", params: { Decay: (2.0 + avgTreble * 3).toFixed(1), Level: (2.0 + loudnessCv).toFixed(1) }, desc: "Classic spring-style ambience for a bright, expressive part." };
+    } else if (darkTone && bassHeavy) {
+      rev = { name: "ARENA", cat: "REV", params: { Decay: (3.0 + avgBass * 3).toFixed(1), Level: "2.0" }, desc: "Long, trailing ambience for a darker, expansive part." };
+    } else if (avgCentroid > 3000 && !highGainTone) {
+      rev = { name: "PLATE", cat: "REV", params: { Decay: (2.2 + avgMid * 2).toFixed(1), Level: "2.4" }, desc: "Smooth plate-style reverb for a clear, bright part." };
+    } else if (avgMid > 0.22 || isLeadSection) {
+      rev = { name: "LARGE HALL", cat: "REV", params: { Decay: (2.5 + avgMid * 2.1).toFixed(1), Level: (2.0 + avgIntensity / 100).toFixed(1) }, desc: "Fuller hall ambience for sustained phrases." };
+    } else {
+      rev = { name: "SMALL ROOM", cat: "REV", params: { Decay: (1.6 + avgMid * 2.5).toFixed(1), Level: (1.6 + avgTreble * 2.0).toFixed(1) }, desc: "Compact room ambience to retain note separation." };
+    }
   }
 
   // EQ responds to the measured spectrum rather than a single default branch.
@@ -1106,8 +1205,9 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
   const bass = parseFloat(Math.max(2.5, Math.min(8.5, 2.8 + avgBass * 11 - (isHeavyProfile ? 0.8 : 0))).toFixed(1));
   const middle = parseFloat(Math.max(2.0, Math.min(8.5, 2.6 + avgMid * 8 + avgUpperMid * 3)).toFixed(1));
   if (isLT25) {
-    // LT25's smaller speaker usually benefits from a slightly tighter low end.
-    // Keep the UI and the chosen model unchanged.
+    // Keep bass a little tighter for the LT25's single 8-inch speaker.
+    // This is a practical starting-point adjustment, not an official Fender preset.
+    // The selected amp model remains the same across the two compatible amp libraries.
   }
 
   const pacTip = isSquier
@@ -1147,7 +1247,7 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
  */
 function renderPresetUI(p, guitarType, ampType = "lt40s") {
   const isSquier = guitarType === "cv70s";
-  const isLT25 = false;
+  const isLT25 = ampType === 'lt25';
 
   document.getElementById('presetTag').textContent = `${p.part} · ${isLT25 ? 'Mustang LT25' : 'Mustang LT40S'} Preset`;
   document.getElementById('presetTitle').textContent = p.presetName;
