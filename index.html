@@ -537,8 +537,6 @@ let globalAudio = null;
 let audioCtx = null;
 let analyserNode = null;
 let sourceNode = null;
-let guitarAnalysisSource = null;
-let demucsSessionPromise = null;
 let animId = null;
 
 // Oscilloscope Canvas
@@ -694,31 +692,6 @@ async function startAiStreamAndListen() {
   try {
     const trackData = await fetchStreamFromSources(song, artist, streamSource);
 
-    // Auto Search guitar isolation: fetch the permitted playable stream, decode it,
-    // and run the same HT-Demucs guitar stem used by local-file analysis.
-    statusPill.innerHTML = '<span>🎸 Downloading accessible audio for guitar separation...</span>';
-    const audioResponse = await fetch(trackData.previewUrl, { mode: 'cors' });
-    if (!audioResponse.ok) throw new Error(`The audio provider returned HTTP ${audioResponse.status}; guitar isolation cannot continue.`);
-    const declaredLength = Number(audioResponse.headers.get('content-length') || 0);
-    if (declaredLength > 80 * 1024 * 1024) throw new Error('This audio source is too large for browser-based separation. Try a shorter preview or a local audio file.');
-    const audioBytes = await audioResponse.arrayBuffer();
-    if (audioBytes.byteLength > 80 * 1024 * 1024) throw new Error('This audio source is too large for browser-based separation. Try a shorter preview or a local audio file.');
-
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!audioCtx) audioCtx = new AudioCtx();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
-    statusPill.innerHTML = '<span>🎸 Decoding audio and preparing the guitar stem...</span>';
-    const decodedStream = await audioCtx.decodeAudioData(audioBytes.slice(0));
-    const effectiveStart = startSec !== null && startSec < decodedStream.duration ? startSec : 0;
-    const effectiveEnd = endSec !== null && endSec > effectiveStart
-      ? Math.min(endSec, decodedStream.duration)
-      : Math.min(decodedStream.duration, effectiveStart + 8);
-    if (effectiveEnd - effectiveStart < 1) throw new Error('The playable audio is too short for guitar separation.');
-    const guitarStem = await isolateGuitar(decodedStream, effectiveStart, effectiveEnd, statusPill);
-    const guitarBuffer = audioCtx.createBuffer(2, guitarStem[0].length, DEMUCS_SAMPLE_RATE);
-    guitarBuffer.copyToChannel(guitarStem[0], 0);
-    guitarBuffer.copyToChannel(guitarStem[1], 1);
-
     // Update Player Deck UI
     document.getElementById('deckTrackTitle').textContent = trackData.trackName;
     document.getElementById('deckArtistName').textContent = trackData.artistName;
@@ -737,15 +710,12 @@ async function startAiStreamAndListen() {
     analyserNode = audioCtx.createAnalyser();
     analyserNode.fftSize = 2048;
     try {
-      // Keep the original recording audible, but analyze only the separated guitar.
+      // Analyze the playing mix directly. No source-separation model is loaded.
       sourceNode = audioCtx.createMediaElementSource(globalAudio);
-      sourceNode.connect(audioCtx.destination);
-      guitarAnalysisSource = audioCtx.createBufferSource();
-      guitarAnalysisSource.buffer = guitarBuffer;
-      guitarAnalysisSource.connect(analyserNode);
-      // The analyser is intentionally not connected to the speakers: no doubled audio.
+      sourceNode.connect(analyserNode);
+      analyserNode.connect(audioCtx.destination);
     } catch (audioGraphError) {
-      throw new Error(`Could not connect the isolated guitar to the analyzer: ${audioGraphError.message}`);
+      throw new Error(`Could not connect the full audio mix to the analyzer: ${audioGraphError.message}`);
     }
 
     // Handle Custom Start Time Seeking
@@ -763,7 +733,6 @@ async function startAiStreamAndListen() {
 
     // Start Playback
     await globalAudio.play();
-    guitarAnalysisSource.start(0);
     isAudioPlaying = true;
     deck.classList.add('playing');
 
@@ -772,7 +741,7 @@ async function startAiStreamAndListen() {
       : "";
 
     btnText.textContent = "AI IS PLAYING & LISTENING TO THE SONG...";
-    statusPill.innerHTML = `<span>🎸 Playing original audio; analyzing isolated guitar from ${trackData.sourceName}${rangeNotice}</span>`;
+    statusPill.innerHTML = `<span>🎸 Playing audio; analyzing the full mix from ${trackData.sourceName}${rangeNotice}</span>`;
 
     // Start Live Scope Visualizer
     const bufferLength = analyserNode.frequencyBinCount;
@@ -836,106 +805,8 @@ async function startAiStreamAndListen() {
 }
 
 /**
- * 4. LOCAL GUITAR SOURCE SEPARATION (HT-DEMUCS 6-STEM / ONNX)
- * Runs in the browser. The audio file itself is never uploaded; only the model
- * weights are downloaded and cached by the browser. Guitar is stem index 4.
- */
-const DEMUCS_SAMPLE_RATE = 44100;
-const DEMUCS_CHUNK_SAMPLES = 343980; // fixed 7.8-second model window
-const DEMUCS_MODEL_URL = 'https://huggingface.co/StemSplitio/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx';
-
-async function getDemucsSession(statusPill) {
-  if (!demucsSessionPromise) {
-    demucsSessionPromise = (async () => {
-      statusPill.innerHTML = '<span>⬇️ Loading guitar-isolation model (about 136 MB, first use only)...</span>';
-      const ort = await import('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.min.mjs');
-      ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(4, navigator.hardwareConcurrency || 2)) : 1;
-      const session = await ort.InferenceSession.create(DEMUCS_MODEL_URL, {
-        executionProviders: ['wasm'],
-        graphOptimizationLevel: 'all'
-      });
-      return { ort, session };
-    })().catch(err => {
-      demucsSessionPromise = null;
-      throw err;
-    });
-  }
-  return demucsSessionPromise;
-}
-
-function audioBufferTo44100Stereo(audioBuffer, startSec, durationSec) {
-  const start = Math.max(0, Math.floor((startSec || 0) * audioBuffer.sampleRate));
-  const available = Math.max(1, audioBuffer.length - start);
-  const requested = Math.max(1, Math.floor((durationSec || 8) * DEMUCS_SAMPLE_RATE));
-  const outLength = Math.min(requested, Math.ceil(available * DEMUCS_SAMPLE_RATE / audioBuffer.sampleRate));
-  const channels = [new Float32Array(outLength), new Float32Array(outLength)];
-  const left = audioBuffer.getChannelData(0);
-  const right = audioBuffer.numberOfChannels > 1 ? audioBuffer.getChannelData(1) : left;
-  const ratio = audioBuffer.sampleRate / DEMUCS_SAMPLE_RATE;
-  for (let i = 0; i < outLength; i++) {
-    const pos = start + i * ratio;
-    const idx = Math.min(audioBuffer.length - 1, Math.floor(pos));
-    const next = Math.min(audioBuffer.length - 1, idx + 1);
-    const frac = pos - idx;
-    channels[0][i] = left[idx] + (left[next] - left[idx]) * frac;
-    channels[1][i] = right[idx] + (right[next] - right[idx]) * frac;
-  }
-  return channels;
-}
-
-async function isolateGuitar(audioBuffer, startSec, endSec, statusPill) {
-  const duration = endSec !== null && endSec > (startSec || 0)
-    ? Math.min(60, endSec - (startSec || 0))
-    : 8;
-  const mix = audioBufferTo44100Stereo(audioBuffer, startSec || 0, duration);
-  const total = mix[0].length;
-  if (total < 2048) throw new Error('The selected audio range is too short for guitar separation.');
-
-  const { ort, session } = await getDemucsSession(statusPill);
-  const overlap = Math.floor(DEMUCS_CHUNK_SAMPLES / 4);
-  const stride = DEMUCS_CHUNK_SAMPLES - overlap;
-  const outL = new Float32Array(total);
-  const outR = new Float32Array(total);
-  const weights = new Float32Array(total);
-  const window = new Float32Array(DEMUCS_CHUNK_SAMPLES);
-  for (let i = 0; i < DEMUCS_CHUNK_SAMPLES; i++) {
-    const edge = Math.min(1, (i + 1) / overlap, (DEMUCS_CHUNK_SAMPLES - i) / overlap);
-    window[i] = Math.max(0.001, edge);
-  }
-  const chunk = new Float32Array(2 * DEMUCS_CHUNK_SAMPLES);
-  const chunkCount = Math.ceil(total / stride);
-
-  for (let part = 0; part < chunkCount; part++) {
-    statusPill.innerHTML = `<span>🎸 Isolating guitar: segment ${part + 1} of ${chunkCount}...</span>`;
-    const start = part * stride;
-    const length = Math.min(DEMUCS_CHUNK_SAMPLES, total - start);
-    chunk.fill(0);
-    chunk.set(mix[0].subarray(start, start + length), 0);
-    chunk.set(mix[1].subarray(start, start + length), DEMUCS_CHUNK_SAMPLES);
-    const result = await session.run({
-      mix: new ort.Tensor('float32', chunk, [1, 2, DEMUCS_CHUNK_SAMPLES])
-    });
-    const stems = result.stems.data;
-    const guitarOffset = 4 * 2 * DEMUCS_CHUNK_SAMPLES; // [drums,bass,other,vocals,guitar,piano]
-    for (let i = 0; i < length; i++) {
-      const w = window[i];
-      outL[start + i] += stems[guitarOffset + i] * w;
-      outR[start + i] += stems[guitarOffset + DEMUCS_CHUNK_SAMPLES + i] * w;
-      weights[start + i] += w;
-    }
-    // Yield between chunks so the page can update its status and remain responsive.
-    await new Promise(resolve => setTimeout(resolve, 0));
-  }
-  for (let i = 0; i < total; i++) {
-    const divisor = Math.max(weights[i], 1e-6);
-    outL[i] /= divisor;
-    outR[i] /= divisor;
-  }
-  return [outL, outR];
-}
-
-/**
- * 4. DIRECT LOCAL AUDIO FILE LISTENER (100% UNRESTRICTED WEB AUDIO ACCESS)
+ * 4. DIRECT LOCAL AUDIO FILE LISTENER
+ * Uses the browser's native Web Audio API. No ML model or source separation.
  */
 document.getElementById('directFileInput').addEventListener('change', async (e) => {
   const file = e.target.files[0];
@@ -948,67 +819,53 @@ document.getElementById('directFileInput').addEventListener('change', async (e) 
   const playBtn = document.getElementById('aiPlayBtn');
   errBox.classList.remove('show');
   playBtn.disabled = true;
-  btnText.textContent = 'PREPARING GUITAR ISOLATION...';
+  btnText.textContent = 'PREPARING AUDIO ANALYSIS...';
 
   const songName = file.name.replace(/\.[^/.]+$/, '');
   document.getElementById('deckTrackTitle').textContent = file.name;
-  document.getElementById('deckArtistName').textContent = 'Local Master File';
+  document.getElementById('deckArtistName').textContent = 'Local Audio File';
   if (globalAudio) { globalAudio.pause(); globalAudio = null; }
-  if (guitarAnalysisSource) { try { guitarAnalysisSource.stop(); } catch {} guitarAnalysisSource = null; }
   if (animId) cancelAnimationFrame(animId);
+  isAudioPlaying = false;
 
   try {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!audioCtx) audioCtx = new AudioCtx();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
 
-    statusPill.innerHTML = '<span>🎸 Decoding local audio before guitar isolation...</span>';
-    const decoded = await audioCtx.decodeAudioData(await file.arrayBuffer());
     const startSec = parseTimeString(document.getElementById('timeStart').value) || 0;
     const enteredEnd = parseTimeString(document.getElementById('timeEnd').value);
-    const endSec = enteredEnd !== null ? Math.min(enteredEnd, decoded.duration) : null;
-    if (endSec !== null && endSec <= startSec) throw new Error('End time must be after start time.');
-
-    const guitarStem = await isolateGuitar(decoded, startSec, endSec, statusPill);
-    const guitarBuffer = audioCtx.createBuffer(2, guitarStem[0].length, DEMUCS_SAMPLE_RATE);
-    guitarBuffer.copyToChannel(guitarStem[0], 0);
-    guitarBuffer.copyToChannel(guitarStem[1], 1);
-
-    // Play the original recording, but feed only the separated guitar stem to the analyzer.
-    analyserNode = audioCtx.createAnalyser();
-    analyserNode.fftSize = 2048;
     const fileUrl = URL.createObjectURL(file);
     globalAudio = new Audio();
     globalAudio.preload = 'auto';
     globalAudio.src = fileUrl;
-    sourceNode = audioCtx.createMediaElementSource(globalAudio);
-    sourceNode.connect(audioCtx.destination);
-    if (startSec > 0) {
-      await new Promise((resolve, reject) => {
-        globalAudio.addEventListener('loadedmetadata', resolve, { once: true });
-        globalAudio.addEventListener('error', () => reject(new Error('The original audio file could not be played.')), { once: true });
-        globalAudio.load();
-      });
-      globalAudio.currentTime = Math.min(startSec, Math.max(0, globalAudio.duration - 0.1));
-    }
 
-    guitarAnalysisSource = audioCtx.createBufferSource();
-    guitarAnalysisSource.buffer = guitarBuffer;
-    guitarAnalysisSource.connect(analyserNode);
+    analyserNode = audioCtx.createAnalyser();
+    analyserNode.fftSize = 2048;
+    sourceNode = audioCtx.createMediaElementSource(globalAudio);
+    sourceNode.connect(analyserNode);
+    analyserNode.connect(audioCtx.destination);
+
+    await new Promise((resolve, reject) => {
+      globalAudio.addEventListener('loadedmetadata', resolve, { once: true });
+      globalAudio.addEventListener('error', () => reject(new Error('The selected audio file could not be played.')), { once: true });
+      globalAudio.load();
+    });
+    if (startSec >= globalAudio.duration) throw new Error('Start time is beyond the end of this audio file.');
+    if (enteredEnd !== null && enteredEnd <= startSec) throw new Error('End time must be after start time.');
+    globalAudio.currentTime = startSec;
 
     await globalAudio.play();
-    guitarAnalysisSource.start();
     isAudioPlaying = true;
     deck.classList.add('playing');
-    btnText.textContent = 'AI IS ANALYZING THE ISOLATED GUITAR...';
-    statusPill.innerHTML = '<span>🎸 Guitar isolated locally — analyzing guitar stem (other instruments excluded as far as the model can separate them).</span>';
+    btnText.textContent = 'AI IS ANALYZING THE AUDIO...';
+    statusPill.innerHTML = '<span>🎧 Analyzing the full recording with lightweight browser audio processing (no audio analysis).</span>';
 
-    const bufferLength = analyserNode.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
     canvas.width = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
     const collectedFftFrames = [];
-    const sampleDurationMs = guitarBuffer.duration * 1000;
+    const analysisEnd = enteredEnd !== null ? Math.min(enteredEnd, globalAudio.duration) : Math.min(globalAudio.duration, startSec + 6);
 
     function renderLocalVisualizer() {
       if (!isAudioPlaying) return;
@@ -1025,22 +882,18 @@ document.getElementById('directFileInput').addEventListener('change', async (e) 
         canvasCtx.fillRect(x, canvas.height - barHeight, barWidth - 2, barHeight);
         x += barWidth;
       }
+      if (globalAudio.currentTime >= analysisEnd || globalAudio.ended) {
+        finishListeningAndDialRig(songName, 'Direct File Audio — full mix', collectedFftFrames, 'Local Web Audio Analysis', startSec, analysisEnd);
+      }
     }
     renderLocalVisualizer();
-    setTimeout(() => {
-      if (isAudioPlaying) {
-        finishListeningAndDialRig(songName, 'Direct File Audio — isolated guitar stem', collectedFftFrames, 'Local HT-Demucs Guitar Separation', startSec, endSec);
-        if (guitarAnalysisSource) { try { guitarAnalysisSource.stop(); } catch {} guitarAnalysisSource = null; }
-      }
-    }, Math.max(1500, sampleDurationMs));
   } catch (err) {
     playBtn.disabled = false;
     btnText.textContent = 'AI: FIND, STREAM & LISTEN TO SONG';
-    statusPill.innerHTML = `<span>⚠️ Guitar isolation error: ${err.message}</span>`;
-    errBox.textContent = `Guitar separation could not run: ${err.message}. Check your internet connection for the first model download, then try again. If the model cannot run in this browser, ToneForge has not analyzed the isolated guitar.`;
+    statusPill.innerHTML = `<span>⚠️ Audio analysis error: ${err.message}</span>`;
+    errBox.textContent = `Audio analysis could not run: ${err.message}. Try another audio file.`;
     errBox.classList.add('show');
     if (globalAudio) globalAudio.pause();
-    if (guitarAnalysisSource) { try { guitarAnalysisSource.stop(); } catch {} guitarAnalysisSource = null; }
     isAudioPlaying = false;
     deck.classList.remove('playing');
   }
@@ -1050,7 +903,6 @@ document.getElementById('directFileInput').addEventListener('change', async (e) 
  * 5. MAP LISTENED MEASUREMENTS TO GUITAR RIG
  */
 function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, endSec) {
-  if (guitarAnalysisSource) { try { guitarAnalysisSource.stop(); } catch {} guitarAnalysisSource = null; }
   const validFrames = (frames || []).filter(frame => frame && frame.some(value => value > 0));
   if (!validFrames.length) {
     const playBtn = document.getElementById('aiPlayBtn');
@@ -1077,7 +929,6 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
   statusPill.innerHTML = `<span>✓ Audio analyzed from: ${sourceName}</span>`;
   deck.classList.remove('playing');
   if (globalAudio) globalAudio.pause();
-  if (guitarAnalysisSource) { try { guitarAnalysisSource.stop(); } catch {} guitarAnalysisSource = null; }
   isAudioPlaying = false;
 
   // Analyze every captured FFT frame using the actual AudioContext sample rate.
