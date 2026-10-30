@@ -1,0 +1,1514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ToneForge — AI Song Finder, Streamer & Tone Matcher</title>
+<style>
+:root{
+  --bg:#0b0d12;
+  --panel:#141821;
+  --panel2:#191f2b;
+  --line:#2a3241;
+  --text:#f3f5f8;
+  --muted:#a5afbf;
+  --red:#ff5148;
+  --red-hover:#e04139;
+  --gold:#ffc86a;
+  --green:#8ce0b0;
+  --blue:#6cb8f6;
+  --purple:#c678dd;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:radial-gradient(ellipse at top right,#25202a 0,#0b0d12 48%);
+  color:var(--text);
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;
+  min-height:100vh;
+}
+.wrap{max-width:1220px;margin:auto;padding:24px 18px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:24px}
+.brand{font-weight:900;letter-spacing:.08em;font-size:22px}
+.brand span{color:var(--red)}
+.badge{border:1px solid #45404a;color:#ffd7d3;border-radius:999px;padding:7px 14px;font-size:11px;font-weight:700}
+.hero h1{font-size:clamp(28px,4vw,44px);line-height:1.06;margin:0 0 10px;letter-spacing:-.04em}
+.hero h1 em{font-style:normal;color:var(--red)}
+.hero p{color:var(--muted);max-width:760px;line-height:1.6;margin:0 0 20px;font-size:14px}
+
+.gear{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:18px 0 24px}
+.gear-card,.card{background:linear-gradient(145deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:16px;padding:18px}
+.gear-card small,.eyebrow{color:var(--muted);text-transform:uppercase;letter-spacing:.12em;font-size:10px;font-weight:800}
+.gear-card strong{display:block;font-size:16px;margin-top:6px;color:#fff}
+.gear-card p{color:var(--muted);font-size:12px;margin:4px 0 0;line-height:1.5}
+.gear-select{
+  width:100%;background:#0d1118;border:1px solid #343d4d;color:var(--gold);padding:8px;border-radius:8px;font:inherit;font-size:12px;font-weight:700;margin-top:8px;outline:none;
+}
+
+.grid{display:grid;grid-template-columns:1fr 1.15fr;gap:20px;align-items:start}
+.card h2{font-size:19px;margin:6px 0 14px}
+.field{margin:13px 0}
+.field label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
+.field input,.field select{
+  width:100%;background:#0d1118;border:1px solid #343d4d;color:var(--text);padding:11px;border-radius:9px;font:inherit;outline:none;transition:border-color .2s;
+}
+.field input:focus,.field select:focus{border-color:var(--red)}
+
+.parts{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.part{background:#0e1219;border:1px solid #303848;color:var(--muted);border-radius:9px;padding:9px 6px;cursor:pointer;font-weight:700;font-size:11px;text-align:center;transition:all .15s}
+.part:hover{border-color:var(--muted);color:#fff}
+.part.active{border-color:var(--red);background:#351b20;color:#fff}
+
+/* AI PLAYER DECK */
+.ai-player-deck{
+  background:#090d15;
+  border:2px solid #28374f;
+  border-radius:14px;
+  padding:14px;
+  margin:14px 0;
+  transition:all .2s;
+}
+.ai-player-deck.playing{
+  border-color:var(--red);
+  box-shadow:0 0 20px rgba(255,81,72,0.3);
+}
+.deck-top{
+  display:flex;
+  gap:12px;
+  align-items:center;
+  margin-bottom:10px;
+}
+.track-art{
+  width:52px;
+  height:52px;
+  border-radius:8px;
+  background:#131a26;
+  object-fit:cover;
+  border:1px solid #273448;
+}
+.track-meta{flex:1;overflow:hidden}
+.track-meta b{display:block;font-size:13px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.track-meta span{font-size:11px;color:var(--muted);display:block}
+
+#scopeCanvas{
+  width:100%;
+  height:80px;
+  background:#040609;
+  border-radius:8px;
+  border:1px solid #1a2433;
+  margin-bottom:10px;
+  display:block;
+}
+
+.btn-ai-play{
+  background:linear-gradient(135deg, #ff5148, #c43831);
+  color:#fff;
+  border:none;
+  padding:13px 18px;
+  border-radius:10px;
+  font-weight:900;
+  font-size:13px;
+  cursor:pointer;
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  transition:all .2s;
+}
+.btn-ai-play:hover{filter:brightness(1.1)}
+.btn-ai-play:disabled{opacity:0.5;cursor:not-allowed}
+
+.ai-status-pill{
+  font-size:11px;
+  color:var(--gold);
+  margin-top:8px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  text-align:center;
+  line-height:1.4;
+}
+
+.badge-row{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.pill{font-size:10px;border:1px solid #384253;border-radius:999px;padding:4px 8px;font-weight:700;letter-spacing:.04em}
+.pill.green{color:var(--green);border-color:#204834}
+.pill.gold{color:var(--gold);border-color:#53432a}
+.pill.blue{color:var(--blue);border-color:#2a3e53}
+
+.preset-hero{
+  background:linear-gradient(135deg, #1b212f, #10141d);
+  border:1px solid #323d52;
+  border-radius:14px;
+  padding:16px;
+  margin-bottom:14px;
+}
+.preset-tag{font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--red);text-transform:uppercase}
+.preset-title{font-size:22px;font-weight:900;margin:4px 0 2px;color:#fff}
+.preset-subtitle{font-size:12px;color:var(--muted)}
+
+/* WHAT THE AI HEARD */
+.heard-card{
+  background:#0d131f;
+  border:2px solid #2c4161;
+  border-radius:12px;
+  padding:14px;
+  margin:12px 0;
+}
+.heard-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:10px;
+  font-size:11px;
+  font-weight:800;
+  color:var(--green);
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+.heard-grid{
+  display:grid;
+  grid-template-columns:repeat(4, 1fr);
+  gap:6px;
+  margin-bottom:10px;
+  text-align:center;
+}
+.heard-metric{
+  background:#131c2b;
+  border:1px solid #202d42;
+  border-radius:8px;
+  padding:8px 4px;
+}
+.heard-metric .h-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:800}
+.heard-metric .h-val{font-size:13px;font-weight:900;color:var(--gold);margin-top:2px}
+
+.amp-matrix{
+  background:#0c0f16;
+  border:1px solid #283244;
+  border-radius:12px;
+  padding:14px;
+  margin:12px 0;
+}
+.amp-name-plate{
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  border-bottom:1px solid #1f2736;
+  padding-bottom:8px;
+  margin-bottom:12px;
+}
+.amp-name-plate strong{font-size:16px;color:var(--gold);letter-spacing:.05em}
+.amp-name-plate span{font-size:11px;color:var(--muted)}
+
+.knobs-grid{
+  display:grid;
+  grid-template-columns:repeat(5, 1fr);
+  gap:8px;
+  text-align:center;
+}
+.knob-pod{
+  background:#131824;
+  border:1px solid #252f42;
+  border-radius:10px;
+  padding:8px 4px;
+}
+.knob-pod .k-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;font-weight:800;letter-spacing:.05em}
+.knob-pod .k-val{font-size:18px;font-weight:900;color:var(--gold);margin:4px 0 2px}
+.knob-pod .k-sub{font-size:9px;color:#6b778c}
+
+.chain-container{margin:14px 0}
+.chain-step{
+  background:#0d1118;
+  border:1px solid #242e40;
+  border-radius:10px;
+  padding:11px 13px;
+  margin-bottom:8px;
+  display:grid;
+  grid-template-columns:110px 1fr;
+  gap:10px;
+  align-items:start;
+}
+.chain-step.empty{opacity:0.6}
+.chain-badge{
+  font-size:10px;
+  font-weight:800;
+  text-transform:uppercase;
+  padding:4px 8px;
+  border-radius:6px;
+  text-align:center;
+  display:inline-block;
+}
+.chain-badge.stomp{background:#351a14;color:#ff9171;border:1px solid #5a2c22}
+.chain-badge.mod{background:#112437;color:#78c2ff;border:1px solid #1f4265}
+.chain-badge.delay{background:#102c1f;color:#7fe4a8;border:1px solid #1c5237}
+.chain-badge.rev{background:#2a1934;color:#df9cf7;border:1px solid #512b66}
+.chain-badge.bypassed{background:#151921;color:#69758a;border:1px solid #283141}
+
+.step-details b{color:#fff;font-size:13px}
+.step-details .p-list{margin:4px 0;display:flex;flex-wrap:wrap;gap:6px;font-size:11px}
+.step-details .p-chip{background:#171d2b;border:1px solid #2e394e;padding:2px 7px;border-radius:5px;color:var(--gold)}
+.step-details .step-desc{font-size:11px;color:var(--muted);line-height:1.4}
+
+.guitar-card{
+  background:#0e131d;
+  border:1px solid #273347;
+  border-radius:12px;
+  padding:14px;
+  margin:14px 0;
+}
+.guitar-card .p-title{
+  font-size:11px;font-weight:800;color:var(--blue);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px
+}
+.pickup-viz{display:flex;gap:6px;margin:8px 0}
+.pu-bobbin{flex:1;text-align:center;padding:7px 2px;border:1px solid #343e50;border-radius:6px;font-size:10px;color:var(--muted);background:#131822}
+.pu-bobbin.active{border-color:var(--red);background:#381a1f;color:#fff;font-weight:800}
+
+.setup-guide{
+  background:#10151f;
+  border:1px solid #2c3649;
+  border-radius:12px;
+  padding:14px;
+  margin:14px 0;
+}
+.setup-guide h4{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--gold)}
+.setup-guide ol{margin:0;padding-left:18px;font-size:12px;color:var(--text);line-height:1.6}
+.setup-guide li{margin-bottom:6px}
+
+.error-msg{
+  background:#381014;border:2px solid #ff4d5a;color:#ffcad0;padding:12px;border-radius:10px;font-size:12px;font-weight:600;margin:12px 0;display:none;line-height:1.5;
+}
+.error-msg.show{display:block}
+.btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.footer{color:#7f8999;font-size:11px;line-height:1.6;margin-top:24px}
+@media(max-width:850px){.grid{grid-template-columns:1fr}.knobs-grid{grid-template-columns:repeat(3,1fr)}.heard-grid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">TONE<span>FORGE</span> <span style="color:#7e8797;font-size:10px;letter-spacing:.04em">AUDIO STREAM LISTENER</span></div>
+    <div class="badge" id="calcCounterBadge">🌐 STREAM FINDER READY</div>
+  </header>
+
+  <section class="hero">
+    <div class="eyebrow">Real Audio Waveform Listening</div>
+    <h1>The AI finds & streams the song.<br><em>Listens live, then sets your gear.</em></h1>
+    <p>ToneForge searches master audio catalogs and streaming networks, routes the live audio into its browser frequency analyzer, and dials in your exact guitar and Fender Mustang LT amplifier.</p>
+  </section>
+
+  <!-- RIG SELECTOR SECTION -->
+  <section class="gear">
+    <div class="gear-card">
+      <small>Active Guitar</small>
+      <select class="gear-select" id="guitarSelect">
+        <option value="pacifica012" selected>Yamaha Pacifica 012 (HSS)</option>
+        <option value="cv70s">Squier Classic Vibe '70s HSS Strat</option>
+      </select>
+      <p id="guitarDesc">Ceramic bridge humbucker, Master Volume & single Master Tone knob.</p>
+    </div>
+    <div class="gear-card">
+      <small>Active Amplifier</small>
+      <select class="gear-select" id="ampSelect" aria-label="Active amplifier">
+        <option value="lt40s" selected>Fender Mustang LT40S (Stereo 40W)</option>
+        <option value="lt25">Fender Mustang LT25 (25W)</option>
+      </select>
+      <p id="ampDesc">Dual 4&quot; full-range stereo speakers. Tight desktop response.</p>
+    </div>
+  </section>
+
+  <div class="grid">
+    <!-- INPUT COLUMN -->
+    <section class="card">
+      <div class="eyebrow">01 / Choose song & audio source</div>
+      <h2>Find & Stream Song</h2>
+
+      <!-- STREAMING SOURCE SELECTOR -->
+      <div class="field">
+        <label for="streamSourceSelect">Audio Stream Source</label>
+        <select id="streamSourceSelect">
+          <option value="auto" selected>Auto-Select (Best Available Stream)</option>
+          <option value="itunes">Source 1: Official Master Catalog (Apple Music/iTunes)</option>
+          <option value="audius">Source 2: Audius Open Music Protocol</option>
+          <option value="custom">Source 3: Direct Web Audio Stream URL (.mp3 / .wav)</option>
+        </select>
+      </div>
+
+      <div class="field" id="customUrlField" style="display:none">
+        <label for="customAudioUrl">Direct Audio Stream URL</label>
+        <input id="customAudioUrl" placeholder="https://example.com/audio-track.mp3">
+      </div>
+
+      <div class="field">
+        <label for="song">Song title <span style="color:var(--red)">*</span></label>
+        <input id="song" placeholder="Enter song title...">
+      </div>
+      <div class="field">
+        <label for="artist">Artist <span style="color:var(--red)">*</span></label>
+        <input id="artist" placeholder="Enter artist name...">
+      </div>
+
+      <div class="field">
+        <label>Target song section</label>
+        <div class="parts" id="parts">
+          <button class="part" data-part="Main riff">Main riff</button>
+          <button class="part active" data-part="Rhythm riff">Rhythm riff</button>
+          <button class="part" data-part="Lead/solo">Lead/solo</button>
+          <button class="part" data-part="Chorus">Chorus</button>
+          <button class="part" data-part="Verse">Verse</button>
+          <button class="part" data-part="Clean section">Clean section</button>
+        </div>
+      </div>
+
+      <!-- OPTIONAL TIME RANGE SELECTOR -->
+      <div class="field">
+        <label>Custom Time Range (Optional)</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:10px;text-transform:none">Start Time (e.g. 1:02 or 0:00)</label>
+            <input id="timeStart" placeholder="0:00 (Optional)">
+          </div>
+          <div>
+            <label style="font-size:10px;text-transform:none">End Time (e.g. 2:02 or 0:30)</label>
+            <input id="timeEnd" placeholder="End of clip (Optional)">
+          </div>
+        </div>
+        <small style="color:var(--muted)">Optional. Leave blank to let the AI listen automatically from the start.</small>
+      </div>
+
+      <!-- THE AI AUTONOMOUS STREAMING DECK -->
+      <div class="ai-player-deck" id="playerDeck">
+        <div class="deck-top">
+          <img class="track-art" id="trackArt" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='52' height='52' fill='%231b2636'%3E%3Crect width='52' height='52'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23677d9e' font-size='22'%3E🎵%3C/text%3E%3C/svg%3E" alt="Album Art">
+          <div class="track-meta">
+            <b id="deckTrackTitle">No Track Loaded</b>
+            <span id="deckArtistName">Ready to search & stream</span>
+          </div>
+        </div>
+
+        <!-- Live Audio Oscilloscope Canvas -->
+        <canvas id="scopeCanvas"></canvas>
+
+        <button type="button" class="btn-ai-play" id="aiPlayBtn">
+          <span>🎧</span> <span id="aiBtnText">AI: FIND, STREAM & LISTEN TO SONG</span>
+        </button>
+
+        <!-- Drop/Upload Audio File Direct Ear -->
+        <div style="margin-top:10px;text-align:center">
+          <label for="directFileInput" style="cursor:pointer;font-size:11px;color:var(--blue);font-weight:700">
+            📁 Or select / drop a local audio file (.mp3, .wav) for direct waveform ear &rarr;
+          </label>
+          <input id="directFileInput" type="file" accept="audio/*" style="display:none">
+        </div>
+
+        <div class="ai-status-pill" id="aiStatusPill">
+          <span>Enter a song and artist above, or select an audio file to begin.</span>
+        </div>
+      </div>
+
+      <div class="error-msg" id="errorMsg"></div>
+    </section>
+
+    <!-- OUTPUT COLUMN -->
+    <section class="card" id="resultCard" style="display:none">
+      <div class="badge-row">
+        <span class="pill green" id="sourceBadge">AI STREAM LISTENED</span>
+        <span class="pill blue" id="ampBadge">LT40S VERIFIED</span>
+      </div>
+
+      <div class="preset-hero">
+        <div class="preset-tag" id="presetTag">Section Tone Preset</div>
+        <div class="preset-title" id="presetTitle">Preset Title</div>
+        <div class="preset-subtitle" id="presetSubtitle">Targeted for Artist — Song</div>
+      </div>
+
+      <!-- ACOUSTIC RADAR: WHAT THE AI LISTENED TO -->
+      <div class="heard-card" id="heardCard">
+        <div class="heard-header">
+          <span>🎧 What The AI Listened To & Detected</span>
+          <span id="heardSourceTag" style="color:var(--gold)">LIVE STREAM CAPTURE</span>
+        </div>
+        <div class="heard-grid">
+          <div class="heard-metric">
+            <div class="h-lbl">Crest Factor</div>
+            <div class="h-val" id="heardCrest">—</div>
+          </div>
+          <div class="heard-metric">
+            <div class="h-lbl">Spectral Centroid</div>
+            <div class="h-val" id="heardCentroid">—</div>
+          </div>
+          <div class="heard-metric">
+            <div class="h-lbl">Distortion Heard</div>
+            <div class="h-val" id="heardDistort">—</div>
+          </div>
+          <div class="heard-metric">
+            <div class="h-lbl">Effects Detected</div>
+            <div class="h-val" id="heardFx">—</div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.45" id="heardExplanation">—</div>
+      </div>
+
+      <!-- AMP MATRIX -->
+      <div class="amp-matrix">
+        <div class="amp-name-plate">
+          <div>
+            <strong id="ampModelName">—</strong>
+            <div style="font-size:11px;color:var(--muted)" id="ampBasedOn">—</div>
+          </div>
+          <span style="font-size:10px;color:var(--gold);font-weight:800" id="ampHeaderBadge">AMP PREAMP</span>
+        </div>
+        <div class="knobs-grid" id="ampKnobsGrid"></div>
+      </div>
+
+      <!-- SIGNAL CHAIN -->
+      <div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 6px">
+        Signal Chain: Built-In Effects Configuration
+      </div>
+      <div class="chain-container" id="chainContainer"></div>
+
+      <!-- GUITAR SETTINGS -->
+      <div class="guitar-card">
+        <div class="p-title" id="guitarCardTitle">Guitar Setup</div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:12px"><b>Pickup Selector:</b> <span id="pacPickup" style="color:#fff;font-weight:800">—</span></span>
+          <span style="font-size:11px;color:var(--gold)">HSS 5-Way Blade</span>
+        </div>
+        <div class="pickup-viz">
+          <div class="pu-bobbin" id="puBridge">BRIDGE (Hum)</div>
+          <div class="pu-bobbin" id="puMid">MIDDLE (Single)</div>
+          <div class="pu-bobbin" id="puNeck">NECK (Single)</div>
+        </div>
+        <div id="knobsGuitarGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0;font-size:11px"></div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.4" id="pacTip"></div>
+      </div>
+
+      <!-- SETUP GUIDE -->
+      <div class="setup-guide">
+        <h4>Step-by-Step Hardware Setup Guide</h4>
+        <ol id="setupSteps"></ol>
+      </div>
+
+      <div class="btn-grid">
+        <button class="primary" id="downloadTxtBtn">EXPORT DIAL-IN SHEET (.TXT) &darr;</button>
+        <button class="secondary" id="saveJsonBtn">EXPORT JSON PRESET &darr;</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="footer">
+    ToneForge Autonomous Auditory Engine &middot; Real-Time Multi-Source Audio Streamer &middot; Strictly for Yamaha Pacifica 012 / Squier CV '70s & Fender Mustang LT40S / LT25.
+  </div>
+</div>
+
+<script>
+/**
+ * 1. MUSTANG LT VERIFIED MODELS
+ */
+const LT_AMPS = {
+  "50S TWIN":     { basedOn: "1957 Fender Twin Tweed" },
+  "60S UK CLN":   { basedOn: "Vox AC30 Top Boost" },
+  "70S ROCK":     { basedOn: "Late-60s/early-70s Marshall Super Lead" },
+  "70S UK CLN":   { basedOn: "Hiwatt DR103" },
+  "80S ROCK":     { basedOn: "Marshall JCM800" },
+  "90S ROCK":     { basedOn: "Mesa/Boogie Dual Rectifier" },
+  "BASSMAN":      { basedOn: "1959 Fender Bassman" },
+  "BURN":         { basedOn: "Fender Super-Sonic Burn Channel" },
+  "CHAMP":        { basedOn: "1957 Fender Champ" },
+  "DELUXE CLN":   { basedOn: "1965 Fender Deluxe Reverb" },
+  "DELUXE DIRT":  { basedOn: "1957 Fender Deluxe" },
+  "DOOM METAL":   { basedOn: "Orange OR120" },
+  "EXCELSIOR":    { basedOn: "Fender Excelsior" },
+  "ALT METAL":    { basedOn: "Mesa Dual Rectifier (gated high gain)" },
+  "METAL 2000":   { basedOn: "EVH 5150III high gain" },
+  "PRINCETON":    { basedOn: "1965 Fender Princeton" },
+  "SMALLTONE":    { basedOn: "1960s Sears Silvertone" },
+  "SUPER CLEAN":  { basedOn: "Direct studio preamp" },
+  "SUPER HEAVY":  { basedOn: "EVH 5150III (gated high gain)" },
+  "TWIN CLEAN":   { basedOn: "1965 Fender Twin Reverb" }
+};
+
+let currentPart = "Rhythm riff";
+let currentPreset = null;
+let isAudioPlaying = false;
+
+// Audio Nodes
+let globalAudio = null;
+let audioCtx = null;
+let analyserNode = null;
+let sourceNode = null;
+let animId = null;
+
+// Oscilloscope Canvas
+const canvas = document.getElementById('scopeCanvas');
+const canvasCtx = canvas.getContext('2d');
+
+function drawIdleScope() {
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+  canvasCtx.fillStyle = "#05070a";
+  canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+  canvasCtx.lineWidth = 1.5;
+  canvasCtx.strokeStyle = "#25344d";
+  canvasCtx.beginPath();
+  const midY = canvas.height / 2;
+  canvasCtx.moveTo(0, midY);
+  canvasCtx.lineTo(canvas.width, midY);
+  canvasCtx.stroke();
+}
+drawIdleScope();
+window.addEventListener('resize', drawIdleScope);
+
+// UI Listeners
+document.getElementById('streamSourceSelect').addEventListener('change', (e) => {
+  document.getElementById('customUrlField').style.display = e.target.value === 'custom' ? 'block' : 'none';
+});
+
+document.querySelectorAll('.part').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.part').forEach(x => x.classList.remove('active'));
+    btn.classList.add('active');
+    currentPart = btn.dataset.part;
+    if (currentPreset) startAiStreamAndListen();
+  });
+});
+
+document.getElementById('guitarSelect').addEventListener('change', () => {
+  const isSquier = document.getElementById('guitarSelect').value === "cv70s";
+  document.getElementById('guitarDesc').textContent = isSquier
+    ? "Fender-Designed Alnico pickups (vintage warmth). Master Volume, Tone 1 (Neck/Mid), Tone 2 (Bridge)."
+    : "Ceramic bridge humbucker, single-coil middle & neck. Master Volume & single Master Tone knob.";
+  if (currentPreset) startAiStreamAndListen();
+});
+
+document.getElementById('ampSelect').addEventListener('change', () => {
+  const ampType = document.getElementById('ampSelect').value;
+  document.getElementById('ampDesc').textContent = ampType === 'lt25'
+    ? 'Single 8" speaker. Compact 25W combo response.'
+    : 'Dual 4" full-range stereo speakers. Tight desktop response.';
+  if (currentPreset) startAiStreamAndListen();
+});
+
+/**
+ * TIMESTAMP PARSER
+ * Supports "1:02", "01:02", "2:02:15", or raw seconds "62"
+ */
+function parseTimeString(str) {
+  if (!str) return null;
+  const s = str.trim();
+  if (!s) return null;
+  if (s.includes(':')) {
+    const parts = s.split(':').map(Number);
+    if (parts.some(isNaN)) return null;
+    if (parts.length === 2) {
+      return parts[0] * 60 + parts[1];
+    } else if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+  }
+  const num = parseFloat(s);
+  return isNaN(num) ? null : Math.max(0, num);
+}
+
+/**
+ * 2. MULTI-SOURCE AUDIO STREAM RETRIEVAL
+ */
+async function fetchStreamFromSources(song, artist, preferredSource) {
+  const customUrl = document.getElementById('customAudioUrl').value.trim();
+  if (preferredSource === 'custom') {
+    if (!customUrl) throw new Error('Enter a direct audio URL first.');
+    return { trackName: song, artistName: artist, previewUrl: customUrl, artworkUrl: '', sourceName: 'Direct Audio Stream URL', isLocal: false, allowCrossOrigin: true };
+  }
+
+  const params = new URLSearchParams({ song, artist, source: preferredSource || 'auto' });
+  const response = await fetch(`/api/search?${params.toString()}`, { headers: { Accept: 'application/json' } });
+  let payload;
+  try { payload = await response.json(); } catch { throw new Error('The music search service returned an invalid response.'); }
+  if (!response.ok) throw new Error(payload.error || 'Music search failed.');
+  if (!Array.isArray(payload.results) || !payload.results.length) {
+    throw new Error(payload.message || `No playable result found for "${song}" by "${artist}". Try Auto-Select or another source.`);
+  }
+
+  // Rank candidates by title/artist match. Prefer full-length streams over short previews
+  // when the match quality is comparable; never claim a preview is the complete song.
+  const norm = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const wantedSong = norm(song), wantedArtist = norm(artist);
+  const score = item => {
+    const title = norm(item.trackName), performer = norm(item.artistName);
+    let n = 0;
+    if (title === wantedSong) n += 12;
+    else if (title.includes(wantedSong) || wantedSong.includes(title)) n += 7;
+    if (wantedArtist) {
+      if (performer === wantedArtist) n += 10;
+      else if (performer.includes(wantedArtist) || wantedArtist.includes(performer)) n += 5;
+    }
+    if (item.isFullTrack) n += 2;
+    if (item.sourceKey === 'audius') n += 1;
+    if (item.previewOnly) n -= 1;
+    return n;
+  };
+  const results = [...payload.results].sort((a,b) => score(b)-score(a));
+  const best = results[0];
+  if (!best || !best.previewUrl) throw new Error('Found metadata, but no playable audio URL was available.');
+  return { ...best, allowCrossOrigin: true };
+}
+
+/**
+ * 3. AUDIO PLAYER & LISTENER ENGINE (NO CORS LOCKUP)
+ */
+async function startAiStreamAndListen() {
+  const song = document.getElementById('song').value.trim();
+  const artist = document.getElementById('artist').value.trim();
+  const streamSource = document.getElementById('streamSourceSelect').value;
+  const errBox = document.getElementById('errorMsg');
+  const playBtn = document.getElementById('aiPlayBtn');
+  const btnText = document.getElementById('aiBtnText');
+  const statusPill = document.getElementById('aiStatusPill');
+  const deck = document.getElementById('playerDeck');
+
+  const startSec = parseTimeString(document.getElementById('timeStart').value);
+  const endSec = parseTimeString(document.getElementById('timeEnd').value);
+
+  errBox.classList.remove('show');
+
+  const isSpotifyTrackLink = /^https:\/\/open\.spotify\.com\/track\/[A-Za-z0-9]+(?:\?.*)?$/i.test(song);
+  if (!song || (!artist && !isSpotifyTrackLink)) {
+    errBox.textContent = "Enter a song title and artist, or paste a Spotify track link in the Song Title field.";
+    errBox.classList.add('show');
+    return;
+  }
+
+  // Stop previous playback
+  if (globalAudio) {
+    globalAudio.pause();
+    globalAudio = null;
+  }
+  if (animId) cancelAnimationFrame(animId);
+
+  playBtn.disabled = true;
+  btnText.textContent = "LOCATING AUDIO STREAM...";
+  statusPill.innerHTML = `<span>🔍 Locating audio stream for "${song}"...</span>`;
+
+  try {
+    const trackData = await fetchStreamFromSources(song, artist, streamSource);
+
+    // Update Player Deck UI
+    document.getElementById('deckTrackTitle').textContent = trackData.trackName;
+    document.getElementById('deckArtistName').textContent = trackData.artistName;
+    if (trackData.artworkUrl) {
+      document.getElementById('trackArt').src = trackData.artworkUrl;
+    }
+
+    // Create Standard HTML5 Audio Element (NO crossOrigin="anonymous" to prevent MEDIA_ERR_SRC_NOT_SUPPORTED)
+    globalAudio = new Audio();
+    globalAudio.preload = "auto";
+    // Set before src so CORS-enabled catalog streams can be analyzed by Web Audio.
+    // A remote host that does not allow CORS may still reject analysis/playback; we report that honestly.
+    if (trackData.allowCrossOrigin) globalAudio.crossOrigin = "anonymous";
+    globalAudio.src = trackData.previewUrl;
+
+    analyserNode = audioCtx.createAnalyser();
+    analyserNode.fftSize = 2048;
+    try {
+      // Analyze the playing mix directly. No source-separation model is loaded.
+      sourceNode = audioCtx.createMediaElementSource(globalAudio);
+      sourceNode.connect(analyserNode);
+      analyserNode.connect(audioCtx.destination);
+    } catch (audioGraphError) {
+      throw new Error(`Could not connect the full audio mix to the analyzer: ${audioGraphError.message}`);
+    }
+
+    // Handle Custom Start Time Seeking
+    let seekedToStart = false;
+    globalAudio.addEventListener('loadedmetadata', () => {
+      if (startSec !== null) {
+        if (startSec < globalAudio.duration) {
+          globalAudio.currentTime = startSec;
+          seekedToStart = true;
+        } else {
+          statusPill.innerHTML = `<span>⚠️ Note: Stream duration is ${Math.round(globalAudio.duration)}s. Seeking to beginning. (Drop full audio file below to listen to ${startSec}s!)</span>`;
+        }
+      }
+    });
+
+    // Start Playback
+    await globalAudio.play();
+    isAudioPlaying = true;
+    deck.classList.add('playing');
+
+    const rangeNotice = (startSec !== null || endSec !== null)
+      ? ` [Range: ${startSec !== null ? startSec + 's' : '0s'} to ${endSec !== null ? endSec + 's' : 'End'}]`
+      : "";
+
+    btnText.textContent = "AI IS PLAYING & LISTENING TO THE SONG...";
+    statusPill.innerHTML = `<span>🎸 Playing audio; analyzing the full mix from ${trackData.sourceName}${rangeNotice}</span>`;
+
+    // Start Live Scope Visualizer
+    const bufferLength = analyserNode.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+
+    const collectedFftFrames = [];
+    let listenTimeout = null;
+
+    function renderVisualizer() {
+      if (!isAudioPlaying) return;
+      animId = requestAnimationFrame(renderVisualizer);
+
+      // Collect frequency data
+      analyserNode.getByteFrequencyData(dataArray);
+
+      // Never synthesize fake waveform data: a flat analyser can mean the host blocks CORS.
+      collectedFftFrames.push(new Uint8Array(dataArray));
+
+      canvasCtx.fillStyle = "#05070a";
+      canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const barWidth = (canvas.width / 32);
+      let x = 0;
+
+      for (let i = 0; i < 32; i++) {
+        const barHeight = (dataArray[i * 4] / 255) * canvas.height;
+        canvasCtx.fillStyle = `rgb(${210 + barHeight}, ${80 + barHeight / 2}, 72)`;
+        canvasCtx.fillRect(x, canvas.height - barHeight, barWidth - 2, barHeight);
+        x += barWidth;
+      }
+
+      // Check if custom end time has been reached
+      if (endSec !== null && globalAudio.currentTime >= endSec) {
+        clearTimeout(listenTimeout);
+        finishListeningAndDialRig(trackData.trackName, trackData.artistName, collectedFftFrames, trackData.sourceName, startSec, endSec);
+      }
+    }
+    renderVisualizer();
+
+    let durationMs = 6000;
+    if (startSec !== null && endSec !== null && endSec > startSec) {
+      durationMs = Math.min(10000, (endSec - startSec) * 1000);
+    }
+
+    listenTimeout = setTimeout(() => {
+      if (isAudioPlaying) {
+        finishListeningAndDialRig(trackData.trackName, trackData.artistName, collectedFftFrames, trackData.sourceName, startSec, endSec);
+      }
+    }, durationMs);
+
+  } catch (err) {
+    playBtn.disabled = false;
+    btnText.textContent = "AI: FIND, STREAM & LISTEN TO SONG";
+    statusPill.innerHTML = `<span>⚠️ Stream error: ${err.message}</span>`;
+    errBox.textContent = `Streaming notice: ${err.message}. Some remote hosts block browser audio analysis. Try Auto-Select, another source, or load an audio file you have permission to use for direct local analysis.`;
+    errBox.classList.add('show');
+    drawIdleScope();
+  }
+}
+
+/**
+ * 4. DIRECT LOCAL AUDIO FILE LISTENER
+ * Uses the browser's native Web Audio API. No ML model or source separation.
+ */
+document.getElementById('directFileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const deck = document.getElementById('playerDeck');
+  const statusPill = document.getElementById('aiStatusPill');
+  const btnText = document.getElementById('aiBtnText');
+  const errBox = document.getElementById('errorMsg');
+  const playBtn = document.getElementById('aiPlayBtn');
+  errBox.classList.remove('show');
+  playBtn.disabled = true;
+  btnText.textContent = 'PREPARING AUDIO ANALYSIS...';
+
+  const songName = file.name.replace(/\.[^/.]+$/, '');
+  document.getElementById('deckTrackTitle').textContent = file.name;
+  document.getElementById('deckArtistName').textContent = 'Local Audio File';
+  if (globalAudio) { globalAudio.pause(); globalAudio = null; }
+  if (animId) cancelAnimationFrame(animId);
+  isAudioPlaying = false;
+
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!audioCtx) audioCtx = new AudioCtx();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+    const startSec = parseTimeString(document.getElementById('timeStart').value) || 0;
+    const enteredEnd = parseTimeString(document.getElementById('timeEnd').value);
+    const fileUrl = URL.createObjectURL(file);
+    globalAudio = new Audio();
+    globalAudio.preload = 'auto';
+    globalAudio.src = fileUrl;
+
+    analyserNode = audioCtx.createAnalyser();
+    analyserNode.fftSize = 2048;
+    sourceNode = audioCtx.createMediaElementSource(globalAudio);
+    sourceNode.connect(analyserNode);
+    analyserNode.connect(audioCtx.destination);
+
+    await new Promise((resolve, reject) => {
+      globalAudio.addEventListener('loadedmetadata', resolve, { once: true });
+      globalAudio.addEventListener('error', () => reject(new Error('The selected audio file could not be played.')), { once: true });
+      globalAudio.load();
+    });
+    if (startSec >= globalAudio.duration) throw new Error('Start time is beyond the end of this audio file.');
+    if (enteredEnd !== null && enteredEnd <= startSec) throw new Error('End time must be after start time.');
+    globalAudio.currentTime = startSec;
+
+    await globalAudio.play();
+    isAudioPlaying = true;
+    deck.classList.add('playing');
+    btnText.textContent = 'AI IS ANALYZING THE AUDIO...';
+    statusPill.innerHTML = '<span>🎧 Analyzing the full recording with lightweight browser audio processing (no audio analysis).</span>';
+
+    const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+    const collectedFftFrames = [];
+    const analysisEnd = enteredEnd !== null ? Math.min(enteredEnd, globalAudio.duration) : Math.min(globalAudio.duration, startSec + 6);
+
+    function renderLocalVisualizer() {
+      if (!isAudioPlaying) return;
+      animId = requestAnimationFrame(renderLocalVisualizer);
+      analyserNode.getByteFrequencyData(dataArray);
+      collectedFftFrames.push(new Uint8Array(dataArray));
+      canvasCtx.fillStyle = '#05070a';
+      canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+      const barWidth = canvas.width / 32;
+      let x = 0;
+      for (let i = 0; i < 32; i++) {
+        const barHeight = (dataArray[i * 4] / 255) * canvas.height;
+        canvasCtx.fillStyle = `rgb(${210 + barHeight}, ${80 + barHeight / 2}, 72)`;
+        canvasCtx.fillRect(x, canvas.height - barHeight, barWidth - 2, barHeight);
+        x += barWidth;
+      }
+      if (globalAudio.currentTime >= analysisEnd || globalAudio.ended) {
+        finishListeningAndDialRig(songName, 'Direct File Audio — full mix', collectedFftFrames, 'Local Web Audio Analysis', startSec, analysisEnd);
+      }
+    }
+    renderLocalVisualizer();
+  } catch (err) {
+    playBtn.disabled = false;
+    btnText.textContent = 'AI: FIND, STREAM & LISTEN TO SONG';
+    statusPill.innerHTML = `<span>⚠️ Audio analysis error: ${err.message}</span>`;
+    errBox.textContent = `Audio analysis could not run: ${err.message}. Try another audio file.`;
+    errBox.classList.add('show');
+    if (globalAudio) globalAudio.pause();
+    isAudioPlaying = false;
+    deck.classList.remove('playing');
+  }
+});
+
+/**
+ * 5. MAP LISTENED MEASUREMENTS TO GUITAR RIG
+ */
+function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, endSec) {
+  const validFrames = (frames || []).filter(frame => frame && frame.some(value => value > 0));
+  if (!validFrames.length) {
+    const playBtn = document.getElementById('aiPlayBtn');
+    const btnText = document.getElementById('aiBtnText');
+    const statusPill = document.getElementById('aiStatusPill');
+    const errBox = document.getElementById('errorMsg');
+    playBtn.disabled = false;
+    btnText.textContent = "▶ RE-PLAY & LISTEN AGAIN";
+    statusPill.innerHTML = `<span>⚠️ Audio played, but this source did not expose analyzable audio.</span>`;
+    errBox.textContent = "ToneForge could not read the audio waveform from this stream. The host may block browser analysis (CORS). Try Auto-Select or another source, or load a local audio file you have permission to use.";
+    errBox.classList.add('show');
+    if (globalAudio) globalAudio.pause();
+    document.getElementById('playerDeck').classList.remove('playing');
+    isAudioPlaying = false;
+    return;
+  }
+
+  const playBtn = document.getElementById('aiPlayBtn');
+  const btnText = document.getElementById('aiBtnText');
+  const statusPill = document.getElementById('aiStatusPill');
+  const deck = document.getElementById('playerDeck');
+  playBtn.disabled = false;
+  btnText.textContent = "▶ RE-PLAY & LISTEN AGAIN";
+  statusPill.innerHTML = `<span>✓ Audio analyzed from: ${sourceName}</span>`;
+  deck.classList.remove('playing');
+  if (globalAudio) globalAudio.pause();
+  isAudioPlaying = false;
+
+  // Analyze every captured FFT frame using the actual AudioContext sample rate.
+  // Ratios are more stable than raw amplitude, which varies by master volume.
+  const sampleRate = (audioCtx && audioCtx.sampleRate) || 44100;
+  const fftSize = (analyserNode && analyserNode.fftSize) || 512;
+  const binHz = sampleRate / fftSize;
+  let bassRatioSum = 0, midRatioSum = 0, trebleRatioSum = 0;
+  let centroidSum = 0, loudnessSum = 0, highMidRatioSum = 0;
+  let guitarBandRatioSum = 0, flatnessSum = 0, fluxSum = 0;
+  const frameLoudness = [];
+  let previousFrame = null;
+  const features = validFrames.map(frame => {
+    let bass = 0, mid = 0, treble = 0, weighted = 0, guitarWeight = 0, weight = 0;
+    let subBass = 0, upperMid = 0, guitarBandEnergy = 0, allBandEnergy = 0;
+    let logMagnitude = 0, arithmeticMagnitude = 0, flatnessBins = 0, positiveFlux = 0, previousEnergy = 0;
+    for (let i = 1; i < frame.length; i++) {
+      const value = frame[i];
+      const hz = i * binHz;
+      weight += value;
+      if (hz >= 20 && hz < 12000) allBandEnergy += value;
+      if (hz >= 80 && hz < 5000) {
+        guitarBandEnergy += value;
+        weighted += hz * value;
+        guitarWeight += value;
+        const magnitude = Math.max(1, value);
+        logMagnitude += Math.log(magnitude);
+        arithmeticMagnitude += magnitude;
+        flatnessBins++;
+      }
+      if (hz >= 45 && hz < 250) bass += value;
+      else if (hz >= 250 && hz < 2500) mid += value;
+      else if (hz >= 2500 && hz < 8000) treble += value;
+      if (hz >= 45 && hz < 120) subBass += value;
+      if (hz >= 1200 && hz < 3500) upperMid += value;
+      if (previousFrame) {
+        positiveFlux += Math.max(0, value - previousFrame[i]);
+        previousEnergy += previousFrame[i];
+      }
+    }
+    const total = bass + mid + treble || 1;
+    const loudness = weight / Math.max(1, frame.length / 4);
+    const flatness = flatnessBins && arithmeticMagnitude > 0
+      ? Math.exp(logMagnitude / flatnessBins) / (arithmeticMagnitude / flatnessBins) : 0;
+    const flux = previousFrame && previousEnergy > 0 ? positiveFlux / previousEnergy : 0;
+    frameLoudness.push(loudness);
+    previousFrame = frame;
+    return {
+      bass: bass / total,
+      mid: mid / total,
+      treble: treble / total,
+      // Guitar-focused band centroid reduces some cymbal/air-band bias;
+      // it does NOT isolate the guitar from a full mix.
+      centroid: guitarWeight ? weighted / guitarWeight : 0,
+      loudness,
+      subBass: subBass / total,
+      upperMid: upperMid / total,
+      guitarBandRatio: guitarBandEnergy / Math.max(1, allBandEnergy),
+      flatness,
+      flux
+    };
+  });
+
+  for (const f of features) {
+    bassRatioSum += f.bass;
+    midRatioSum += f.mid;
+    trebleRatioSum += f.treble;
+    centroidSum += f.centroid;
+    loudnessSum += f.loudness;
+    highMidRatioSum += f.upperMid;
+  }
+  const count = features.length || 1;
+  // Robust percentiles retain short, meaningful phrases that a simple average
+  // can wash out (for example, a brief high-register lead phrase in a riff).
+  const percentile = (values, q) => {
+    const sorted = values.filter(Number.isFinite).slice().sort((a, b) => a - b);
+    if (!sorted.length) return 0;
+    const position = (sorted.length - 1) * q;
+    const lower = Math.floor(position), upper = Math.ceil(position);
+    const blend = position - lower;
+    return sorted[lower] * (1 - blend) + sorted[upper] * blend;
+  };
+  const p20Bass = percentile(features.map(f => f.bass), 0.20);
+  const p80Bass = percentile(features.map(f => f.bass), 0.80);
+  const p20Mid = percentile(features.map(f => f.mid), 0.20);
+  const p80Mid = percentile(features.map(f => f.mid), 0.80);
+  const p20Treble = percentile(features.map(f => f.treble), 0.20);
+  const p80Treble = percentile(features.map(f => f.treble), 0.80);
+  const p75Centroid = percentile(features.map(f => f.centroid), 0.75);
+  const p25Centroid = percentile(features.map(f => f.centroid), 0.25);
+  const avgBass = bassRatioSum / count;
+  const avgMid = midRatioSum / count;
+  const avgTreble = trebleRatioSum / count;
+  const avgCentroid = Math.round(centroidSum / count);
+  const avgIntensity = loudnessSum / count;
+  const avgUpperMid = highMidRatioSum / count;
+  const avgGuitarBandRatio = features.reduce((sum, f) => sum + f.guitarBandRatio, 0) / count;
+  const avgSpectralFlatness = features.reduce((sum, f) => sum + f.flatness, 0) / count;
+  const avgSpectralFlux = features.reduce((sum, f) => sum + f.flux, 0) / count;
+  // These are mix-character clues, not a true isolated-guitar confidence score.
+  const broadbandMix = Math.max(0, Math.min(1, (avgSpectralFlatness - 0.12) / 0.48));
+  const guitarFocus = Math.max(0, Math.min(1, (avgGuitarBandRatio - 0.28) / 0.58));
+  const loudnessMean = frameLoudness.reduce((a, b) => a + b, 0) / count;
+  const loudnessVariance = frameLoudness.reduce((sum, value) => sum + Math.pow(value - loudnessMean, 2), 0) / count;
+  const loudnessCv = loudnessMean > 0 ? Math.sqrt(loudnessVariance) / loudnessMean : 0;
+
+  // Extra texture measurements: frame-to-frame spectral movement and tonal stability.
+  // These help distinguish two songs with similar average EQ but different playing/mix character.
+  const meanCentroid = features.reduce((sum, f) => sum + f.centroid, 0) / count;
+  const centroidStd = Math.sqrt(features.reduce((sum, f) => sum + Math.pow(f.centroid - meanCentroid, 2), 0) / count);
+  const trebleStd = Math.sqrt(features.reduce((sum, f) => sum + Math.pow(f.treble - avgTreble, 2), 0) / count);
+  const bassStd = Math.sqrt(features.reduce((sum, f) => sum + Math.pow(f.bass - avgBass, 2), 0) / count);
+  const centroidRange = Math.min(1, Math.max(0, (p75Centroid - p25Centroid) / 2600));
+  const bandRange = Math.min(1, (p80Treble - p20Treble) * 1.8 + (p80Bass - p20Bass) * 1.2 + (p80Mid - p20Mid));
+  const spectralMovement = Math.min(1, centroidStd / 2200 + trebleStd * 1.8 + bassStd * 1.2 + centroidRange * 0.22 + bandRange * 0.18);
+  const tonalStability = Math.max(0, 1 - spectralMovement);
+  const punch = Math.max(0, Math.min(1, loudnessCv));
+  const transientActivity = Math.max(0, Math.min(1, avgSpectralFlux / 0.9));
+  const mixDensity = Math.max(0, Math.min(1, (avgIntensity - 55) / 55 * 0.55 + broadbandMix * 0.45));
+
+  // Pick a tonal family from measured spectral shape + dynamics, then apply
+  // the user's selected section as a useful override instead of making every
+  // non-clean song the same high-gain preset.
+  const section = currentPart.toLowerCase();
+  const isCleanSection = section.includes('clean');
+  const isLeadSection = section.includes('lead') || section.includes('solo');
+  const isHeavyProfile = !isCleanSection && !isLeadSection &&
+    ((avgTreble > 0.27 && avgUpperMid > 0.16) ||
+     (avgCentroid > 3000 && avgBass > 0.23) ||
+     (p80Treble > 0.34 && p75Centroid > 3300 && avgUpperMid > 0.13) ||
+     (avgIntensity > 92 && loudnessCv < 0.42) ||
+     (avgBass > 0.28 && avgUpperMid > 0.17 && spectralMovement < 0.30));
+  const isBrightProfile = avgTreble > 0.31 || avgCentroid > 3400 || p80Treble > 0.36 || p75Centroid > 3700 || (avgTreble > 0.27 && centroidStd > 520);
+  let amp, gain, stomp, mod, delay, rev, pickup, tonePot, distDesc, crestFactor;
+
+  const noStomp = { name: "NONE", cat: "STOMP", params: {}, desc: "Bypassed." };
+  const noMod = { name: "NONE", cat: "MOD", params: {}, desc: "Bypassed." };
+  const noDelay = { name: "NONE", cat: "DELAY", params: {}, desc: "Bypassed." };
+  const guitarType = document.getElementById('guitarSelect').value;
+  const ampType = document.getElementById('ampSelect').value;
+  const isSquier = guitarType === "cv70s";
+  const isLT25 = ampType === "lt25";
+  pickup = "Position 1 — Bridge Humbucker";
+  tonePot = isSquier ? "8.5" : "7.5";
+  mod = noMod;
+  delay = noDelay;
+
+  if (isCleanSection) {
+    amp = "TWIN CLEAN";
+    gain = 2.0 + Math.min(1.1, avgIntensity / 110);
+    crestFactor = 12.5 + Math.min(3.5, loudnessCv * 4);
+    distDesc = "Clean / Wide Dynamics";
+    pickup = avgTreble > 0.3 ? "Position 4 — Middle + Neck Single-Coils" : "Position 5 — Neck Single-Coil";
+    tonePot = "9.5";
+    stomp = avgIntensity < 65
+      ? { name: "COMPRESSOR", cat: "STOMP", params: { Level: "6.5", Sensitivity: "4.5" }, desc: "Light leveling for clean notes." }
+      : noStomp;
+    if (section.includes('intro') || loudnessCv > 0.48) {
+      mod = { name: "CHORUS", cat: "MOD", params: { Rate: "2.4", Depth: "5.2", Level: "4.5" }, desc: "Subtle movement for spacious clean passages." };
+    }
+    if (avgCentroid > 3000) {
+      delay = { name: "DELAY", cat: "DELAY", params: { Time: "300ms", Feedback: "2.8", Level: "2.5" }, desc: "Low-mix repeats for clear clean phrases." };
+    }
+    rev = { name: "SPRING 65", cat: "REV", params: { Decay: (2.8 + avgTreble * 4).toFixed(1), Level: "3.2" }, desc: "Spring ambience for clean attack." };
+  } else if (isLeadSection) {
+    // Lead sections need their own profile test: isHeavyProfile intentionally
+    // excludes solos, so using it here made every ordinary solo identical.
+    const leadHighGain = avgBass > 0.27 && avgUpperMid > 0.145 && avgIntensity > 72;
+    const leadVintage = avgUpperMid > 0.19 && avgTreble < 0.29 && loudnessCv > 0.28;
+    const leadBright = avgTreble > 0.30 || avgCentroid > 3300;
+    const leadDark = avgTreble < 0.19 || avgCentroid < 2100;
+    const leadDynamic = loudnessCv > 0.48;
+
+    if (leadHighGain && leadBright) amp = "SUPER HEAVY";
+    else if (leadHighGain) amp = "ALT METAL";
+    else if (leadVintage) amp = "70S ROCK";
+    else if (leadDark) amp = "BURN";
+    else if (leadBright) amp = "90S ROCK";
+    else amp = "80S ROCK";
+
+    gain = Math.max(4.2, Math.min(9.0,
+      (amp === "SUPER HEAVY" || amp === "ALT METAL" ? 7.2 : amp === "70S ROCK" ? 5.4 : 6.0)
+      + avgTreble * 2.8 + avgUpperMid * 2.2 + (avgIntensity > 90 ? 0.3 : 0)
+    ));
+    crestFactor = (leadHighGain ? 6.2 : 8.0) + Math.min(2.0, loudnessCv * 2.2);
+    distDesc = leadHighGain ? "High-Gain Lead / Sustain" : leadVintage ? "Vintage Mid-Focused Lead" : leadBright ? "Bright Articulate Lead" : "Warm Singing Lead";
+    tonePot = isSquier ? (leadBright ? "7.6" : "8.5") : (leadBright ? "7.2" : "8.0");
+
+    if (leadHighGain) {
+      stomp = { name: "MYTH DRIVE", cat: "STOMP", params: { Gain: "1.0", Level: (8.0 + avgUpperMid * 2).toFixed(1), Tone: (5.4 + avgTreble * 3).toFixed(1) }, desc: "Tight boost for a high-gain lead." };
+    } else if (leadVintage || leadDark) {
+      stomp = { name: "BLUES DRIVE", cat: "STOMP", params: { Gain: (2.6 + avgIntensity / 100).toFixed(1), Level: (7.0 + avgUpperMid * 2).toFixed(1), Tone: (5.2 + avgTreble * 3).toFixed(1) }, desc: "Mid-focused drive for a rounded lead tone." };
+    } else {
+      stomp = { name: "OVERDRIVE", cat: "STOMP", params: { Gain: "2.2", Level: (7.4 + avgUpperMid * 2).toFixed(1), Tone: (5.8 + avgTreble * 2).toFixed(1) }, desc: "Focused overdrive for clear lead articulation." };
+    }
+
+    if (leadDynamic && leadBright) {
+      delay = { name: "ECHO", cat: "DELAY", params: { Time: "280ms", Feedback: "2.2", Level: "2.0" }, desc: "Short, subtle repeats for a lively bright lead." };
+    } else if (leadHighGain) {
+      delay = { name: "DELAY", cat: "DELAY", params: { Time: "300ms", Feedback: "2.6", Level: "2.5" }, desc: "Controlled repeats that preserve high-gain note definition." };
+    } else {
+      delay = { name: "DELAY", cat: "DELAY", params: { Time: (340 + Math.round(avgTreble * 240)) + "ms", Feedback: (2.6 + avgMid * 2.2).toFixed(1), Level: (2.2 + avgIntensity / 65).toFixed(1) }, desc: "Lead repeats scaled to the measured tonal balance." };
+    }
+
+    if (leadDynamic && leadBright) {
+      mod = { name: "PHASER", cat: "MOD", params: { Rate: "1.8", Depth: "3.0", Level: "2.5" }, desc: "Subtle motion for a bright, dynamic lead." };
+    } else if (leadDark || leadVintage) {
+      mod = { name: "CHORUS", cat: "MOD", params: { Rate: "1.5", Depth: "3.2", Level: "2.8" }, desc: "Gentle width for a warmer lead sound." };
+    }
+
+    if (leadHighGain) {
+      rev = { name: "SMALL ROOM", cat: "REV", params: { Decay: "1.9", Level: "1.8" }, desc: "Short ambience to keep high-gain leads defined." };
+    } else if (leadBright) {
+      rev = { name: "SPRING 65", cat: "REV", params: { Decay: "2.6", Level: "2.8" }, desc: "Spring-style space for a bright lead." };
+    } else {
+      rev = { name: "LARGE HALL", cat: "REV", params: { Decay: (2.5 + avgMid * 2.1).toFixed(1), Level: (2.2 + avgIntensity / 90).toFixed(1) }, desc: "Moderate ambience for a rounded lead tone." };
+    }
+  } else if (isHeavyProfile) {
+    const veryBrightHeavy = avgTreble > 0.32 || avgCentroid > 3600;
+    const darkHeavy = avgTreble < 0.22 || avgCentroid < 2400;
+    amp = veryBrightHeavy ? "METAL 2000" : darkHeavy ? "DOOM METAL" : "SUPER HEAVY";
+    gain = Math.max(6.8, Math.min(9.2, 7.0 + avgTreble * 3.0 + avgUpperMid * 2.0 + (avgIntensity > 90 ? 0.3 : 0)));
+    crestFactor = 5.5 + Math.min(1.4, loudnessCv * 2);
+    distDesc = veryBrightHeavy ? "Bright Modern Metal Rhythm" : darkHeavy ? "Dark, Thick High-Gain Rhythm" : "High-Gain / Tight Rhythm";
+    tonePot = isSquier ? (veryBrightHeavy ? "6.8" : "7.8") : (veryBrightHeavy ? "6.3" : "7.0");
+    stomp = darkHeavy
+      ? { name: "BLUES DRIVE", cat: "STOMP", params: { Gain: "1.8", Level: "7.8", Tone: "5.0" }, desc: "Low-gain mid push to define a darker high-gain sound." }
+      : { name: "MYTH DRIVE", cat: "STOMP", params: { Gain: "1.2", Level: "8.5", Tone: (5.3 + avgTreble * 3).toFixed(1) }, desc: "Tight boost in front of the high-gain amp." };
+    rev = darkHeavy
+      ? { name: "LARGE HALL", cat: "REV", params: { Decay: "2.2", Level: "2.0" }, desc: "Slightly fuller ambience for a thick, sustained riff." }
+      : { name: "SMALL ROOM", cat: "REV", params: { Decay: "1.8", Level: "1.5" }, desc: "Short ambience keeps palm-muted riffs tight." };
+  } else {
+    amp = "80S ROCK";
+    gain = Math.max(4.8, Math.min(7.8, 5.0 + avgTreble * 4.5 + avgUpperMid * 3));
+    crestFactor = 7.2 + Math.min(1.4, loudnessCv * 2.2);
+    distDesc = avgIntensity < 55 ? "Open Crunch / Dynamic Attack" : "Rock Crunch / Overdrive";
+    tonePot = isSquier ? "8.6" : "8.0";
+    stomp = { name: avgUpperMid > 0.17 ? "BLUES DRIVE" : "OVERDRIVE", cat: "STOMP", params: avgUpperMid > 0.17
+      ? { Gain: "3.2", Level: "7.5", Tone: "5.8" }
+      : { Gain: "2.6", Level: "7.8", Tone: "6.2" }, desc: "Moderate overdrive with a defined midrange." };
+    if (avgCentroid < 2200 || avgTreble < 0.18) {
+      mod = { name: "CHORUS", cat: "MOD", params: { Rate: "1.6", Depth: "3.8", Level: "3.0" }, desc: "Low-depth chorus for a darker, wider rhythm sound." };
+    }
+    if (avgCentroid > 2700 && loudnessCv > 0.35) {
+      delay = { name: "ECHO", cat: "DELAY", params: { Time: "260ms", Feedback: "2.4", Level: "2.2" }, desc: "Subtle slap/space for articulate rock phrases." };
+    }
+    rev = { name: "LARGE HALL", cat: "REV", params: { Decay: (2.2 + avgMid * 2).toFixed(1), Level: "2.4" }, desc: "Short hall ambience for rhythm definition." };
+  }
+
+  // Final audio-driven FX pass. Every model name below is from the official
+  // Mustang LT25/LT40S effect lists; the manuals share these effect labels. Choices are deterministic and use measured
+  // spectrum/dynamics; only supported LT40S effect labels are used.
+  if (!isCleanSection) {
+    const darkTone = avgTreble < 0.235 || avgCentroid < 2550;
+    const brightTone = avgTreble > 0.285 || avgCentroid > 3150;
+    const midForward = avgUpperMid > 0.175 || (avgMid > 0.25 && avgTreble > 0.22);
+    const dynamicPerformance = loudnessCv > 0.38 || spectralMovement > 0.34 || transientActivity > 0.42;
+    const denseMix = (avgIntensity > 82 && loudnessCv < 0.30 && tonalStability > 0.68) || (mixDensity > 0.72 && broadbandMix > 0.52);
+    const bassHeavy = avgBass > 0.30;
+    const mixHasStrongGuitarBand = guitarFocus > 0.42;
+    const percussiveOrNoisyMix = broadbandMix > 0.68 && avgSpectralFlatness > 0.38;
+    const highGainTone = (isHeavyProfile || (isLeadSection && avgIntensity > 78 && bassHeavy)) && (!percussiveOrNoisyMix || mixHasStrongGuitarBand);
+
+    // STOMP: choose among all listed Mustang LT25/LT40S stompbox models.
+    if (highGainTone && denseMix) {
+      stomp = { name: "METAL GATE", cat: "STOMP", params: { Threshold: (4.0 + avgIntensity / 30).toFixed(1), Level: "5.5" }, desc: "Noise-gate option for a dense, high-gain sound." };
+    } else if (highGainTone && darkTone) {
+      stomp = { name: "MYTH DRIVE", cat: "STOMP", params: { Gain: "1.4", Level: (7.4 + avgUpperMid * 2).toFixed(1), Tone: (4.8 + avgTreble * 3).toFixed(1) }, desc: "Low-gain boost for a darker high-gain tone." };
+    } else if (highGainTone && brightTone) {
+      stomp = { name: "ROCK DIRT", cat: "STOMP", params: { Gain: (4.8 + avgIntensity / 40).toFixed(1), Level: "6.5", Tone: (5.0 + avgTreble * 3).toFixed(1) }, desc: "More assertive distortion for a bright, aggressive part." };
+    } else if (avgBass > 0.34 && avgTreble > 0.28) {
+      stomp = { name: "OCTOBOT", cat: "STOMP", params: { Octave: "4.5", Fuzz: "5.5", Level: "5.5" }, desc: "Octave-and-fuzz character for a strong low/high-frequency mix." };
+    } else if (avgIntensity < 58 || loudnessCv > 0.58 || (transientActivity > 0.62 && !highGainTone)) {
+      stomp = { name: "COMPRESSOR", cat: "STOMP", params: { Level: "6.5", Sensitivity: (3.8 + loudnessCv * 2).toFixed(1) }, desc: "Compression to even out a quieter or highly dynamic part." };
+    } else if (avgTreble > 0.34 && avgBass < 0.22) {
+      stomp = { name: "FUZZ", cat: "STOMP", params: { Gain: (5.0 + avgIntensity / 35).toFixed(1), Level: "5.8", Tone: "6.0" }, desc: "Fuzz for a bright, cutting texture." };
+    } else if (avgBass > 0.32 && avgUpperMid < 0.15) {
+      stomp = { name: "BIG FUZZ", cat: "STOMP", params: { Gain: "6.2", Level: "5.5", Tone: "4.8" }, desc: "Fuller fuzz character for a bass-heavy, less mid-forward sound." };
+    } else if (dynamicPerformance && midForward) {
+      stomp = { name: "SUSTAIN", cat: "STOMP", params: { Sustain: (5.0 + loudnessCv * 2).toFixed(1), Level: "5.8" }, desc: "Strong sustain for expressive, dynamically varied phrases." };
+    } else if (brightTone && !highGainTone) {
+      stomp = { name: "5-BAND EQ", cat: "STOMP", params: { Low: "4.5", LowMid: "5.0", Mid: "5.8", HighMid: "5.8", High: (5.0 + avgTreble * 2).toFixed(1) }, desc: "Graphic EQ option for shaping a bright, articulate tone." };
+    } else if (midForward) {
+      stomp = { name: "BLUES DRIVE", cat: "STOMP", params: { Gain: (2.2 + avgIntensity / 90).toFixed(1), Level: (7.0 + avgUpperMid * 2.5).toFixed(1), Tone: (4.8 + avgTreble * 3.5).toFixed(1) }, desc: "Mid-focused overdrive for added definition." };
+    } else {
+      stomp = { name: "OVERDRIVE", cat: "STOMP", params: { Gain: (2.0 + avgTreble * 3).toFixed(1), Level: "7.2", Tone: (5.0 + avgTreble * 2.5).toFixed(1) }, desc: "General-purpose overdrive for a moderate crunch." };
+    }
+
+    // MODULATION: all listed LT25/LT40S modulation models are represented in the decision tree.
+    if (dynamicPerformance && brightTone && avgTreble > 0.32) {
+      mod = { name: "FLANGER", cat: "MOD", params: { Rate: (1.2 + loudnessCv).toFixed(1), Depth: (3.0 + avgTreble * 3).toFixed(1), Level: "2.5" }, desc: "Flanging for a bright, moving texture." };
+    } else if (darkTone && bassHeavy) {
+      mod = { name: "VIBRATONE", cat: "MOD", params: { Rate: (1.2 + avgBass * 2).toFixed(1), Depth: "3.5", Level: "2.8" }, desc: "Rotary-speaker-style movement for a darker, bass-heavy part." };
+    } else if (midForward && avgTreble > 0.24 && loudnessCv > 0.25) {
+      mod = { name: "PHASER", cat: "MOD", params: { Rate: (1.2 + avgUpperMid * 3).toFixed(1), Depth: (2.0 + avgUpperMid * 5).toFixed(1), Level: "2.2" }, desc: "Phasing to add movement without masking the mids." };
+    } else if (avgCentroid > 3000 && avgIntensity < 72) {
+      mod = { name: "TOUCH WAH", cat: "MOD", params: { Sensitivity: (5.0 + avgTreble * 3).toFixed(1), Level: "3.0" }, desc: "Picking-responsive wah character for a light, articulate part." };
+    } else if (dynamicPerformance && avgUpperMid < 0.16) {
+      mod = { name: "TREMOLO", cat: "MOD", params: { Rate: (2.0 + loudnessCv * 2).toFixed(1), Depth: "3.2", Level: "2.8" }, desc: "Pulsing tremolo for a rhythmically dynamic part." };
+    } else if (avgCentroid > 2500 && avgTreble < 0.31) {
+      mod = { name: "STEP FILTER", cat: "MOD", params: { Rate: (1.5 + avgMid * 2).toFixed(1), Sensitivity: "4.5", Level: "2.5" }, desc: "Choppy filter movement for a midrange-focused sound." };
+    } else if (darkTone || isLeadSection || section.includes('intro')) {
+      mod = { name: "CHORUS", cat: "MOD", params: { Rate: (1.1 + avgBass * 2).toFixed(1), Depth: (2.4 + avgBass * 4).toFixed(1), Level: "2.6" }, desc: "Subtle chorus to widen the part." };
+    } else {
+      mod = noMod;
+    }
+
+    // DELAY: use the exact LT40S names DELAY, REVERSE and ECHO.
+    if (dynamicPerformance && brightTone && avgCentroid > 3000) {
+      delay = { name: "ECHO", cat: "DELAY", params: { Time: (220 + Math.round(avgTreble * 180)) + "ms", Feedback: (1.8 + loudnessCv * 1.4).toFixed(1), Level: (1.6 + avgUpperMid * 3).toFixed(1) }, desc: "Tape-style echo for a bright, dynamic phrase." };
+    } else if (isLeadSection && avgUpperMid > 0.18 && avgIntensity > 70) {
+      delay = { name: "REVERSE", cat: "DELAY", params: { Time: (300 + Math.round(avgMid * 160)) + "ms", Feedback: (1.8 + avgMid * 1.5).toFixed(1), Level: "2.0" }, desc: "Reverse repeats for a distinctive lead texture." };
+    } else if (denseMix || (bassHeavy && avgTreble < 0.27)) {
+      delay = noDelay;
+    } else if (isLeadSection || midForward || avgCentroid > 2450) {
+      delay = { name: "DELAY", cat: "DELAY", params: { Time: (300 + Math.round(avgMid * 180)) + "ms", Feedback: (1.8 + avgMid * 2.2).toFixed(1), Level: (1.6 + avgIntensity / 90).toFixed(1) }, desc: "Clean repeats to support note sustain." };
+    } else {
+      delay = { name: "ECHO", cat: "DELAY", params: { Time: (190 + Math.round(avgBass * 180)) + "ms", Feedback: "1.8", Level: "1.8" }, desc: "Low-feedback tape echo for depth without clutter." };
+    }
+
+    // REVERB: all five LT25/LT40S reverb models are available across different profiles.
+    if (denseMix) {
+      rev = { name: "SMALL ROOM", cat: "REV", params: { Decay: (1.4 + avgTreble * 2).toFixed(1), Level: (1.0 + avgUpperMid * 1.7).toFixed(1) }, desc: "Tight room ambience for a dense mix." };
+    } else if (brightTone && dynamicPerformance) {
+      rev = { name: "SPRING 65", cat: "REV", params: { Decay: (2.0 + avgTreble * 3).toFixed(1), Level: (2.0 + loudnessCv).toFixed(1) }, desc: "Classic spring-style ambience for a bright, expressive part." };
+    } else if (darkTone && bassHeavy) {
+      rev = { name: "ARENA", cat: "REV", params: { Decay: (3.0 + avgBass * 3).toFixed(1), Level: "2.0" }, desc: "Long, trailing ambience for a darker, expansive part." };
+    } else if (avgCentroid > 3000 && !highGainTone) {
+      rev = { name: "PLATE", cat: "REV", params: { Decay: (2.2 + avgMid * 2).toFixed(1), Level: "2.4" }, desc: "Smooth plate-style reverb for a clear, bright part." };
+    } else if (avgMid > 0.22 || isLeadSection) {
+      rev = { name: "LARGE HALL", cat: "REV", params: { Decay: (2.5 + avgMid * 2.1).toFixed(1), Level: (2.0 + avgIntensity / 100).toFixed(1) }, desc: "Fuller hall ambience for sustained phrases." };
+    } else {
+      rev = { name: "SMALL ROOM", cat: "REV", params: { Decay: (1.6 + avgMid * 2.5).toFixed(1), Level: (1.6 + avgTreble * 2.0).toFixed(1) }, desc: "Compact room ambience to retain note separation." };
+    }
+  }
+
+  // Continuous refinement: keep the selected effect family, but tune its controls
+  // to the measured movement and dynamics instead of relying only on fixed presets.
+  const tuneEffect = (effect, category) => {
+    if (!effect || !effect.params) return;
+    const params = effect.params;
+    const movement = spectralMovement;
+    const dynamic = punch;
+    const tune = (key, value) => {
+      if (Object.prototype.hasOwnProperty.call(params, key)) params[key] = value.toFixed(1);
+    };
+    if (category === "STOMP") {
+      tune("Gain", Math.min(7.5, Math.max(0.8, (parseFloat(params.Gain) || 2.5) + (avgIntensity > 85 ? 0.5 : -0.2) + avgUpperMid * 1.2)));
+      tune("Level", Math.min(9.5, Math.max(2, (parseFloat(params.Level) || 5.5) + (dynamic > 0.45 ? -0.4 : 0.2))));
+      tune("Tone", Math.min(9, Math.max(1, (parseFloat(params.Tone) || 5) + (avgTreble - 0.27) * 5)));
+      tune("Sensitivity", Math.min(9, Math.max(1, (parseFloat(params.Sensitivity) || 4) + dynamic * 1.2)));
+      tune("Threshold", Math.min(9, Math.max(1, (parseFloat(params.Threshold) || 4) + (avgIntensity - 70) / 35)));
+      tune("Sustain", Math.min(9, Math.max(1, (parseFloat(params.Sustain) || 5) + dynamic * 1.1)));
+      tune("Fuzz", Math.min(9, Math.max(1, (parseFloat(params.Fuzz) || 5) + (avgBass - 0.25) * 5)));
+      tune("Octave", Math.min(9, Math.max(1, (parseFloat(params.Octave) || 4.5) + (avgBass - 0.25) * 3)));
+    } else if (category === "MOD") {
+      tune("Rate", Math.min(8, Math.max(0.5, (parseFloat(params.Rate) || 2) + movement * 1.2)));
+      tune("Depth", Math.min(8, Math.max(0.5, (parseFloat(params.Depth) || 3) + movement * 1.4 - tonalStability * 0.4)));
+      tune("Level", Math.min(7, Math.max(0.5, (parseFloat(params.Level) || 2.5) + movement * 0.5)));
+      tune("Sensitivity", Math.min(8, Math.max(1, (parseFloat(params.Sensitivity) || 4) + dynamic * 1.1)));
+    } else if (category === "DELAY") {
+      tune("Feedback", Math.min(6, Math.max(0.5, (parseFloat(params.Feedback) || 2) + (isLeadSection ? 0.3 : 0) - (avgIntensity > 85 ? 0.4 : 0))));
+      tune("Level", Math.min(5, Math.max(0.5, (parseFloat(params.Level) || 2) + (isLeadSection ? 0.3 : 0) - movement * 0.4)));
+    } else if (category === "REV") {
+      tune("Decay", Math.min(8, Math.max(0.5, (parseFloat(params.Decay) || 2) + (isLeadSection ? 0.25 : 0) - (avgIntensity > 85 ? 0.35 : 0))));
+      tune("Level", Math.min(5, Math.max(0.5, (parseFloat(params.Level) || 2) + (tonalStability * 0.25) - (avgIntensity > 85 ? 0.35 : 0))));
+    }
+    // Every numeric effect control is constrained to the amp's 0–10 scale.
+    for (const [key, raw] of Object.entries(params)) {
+      const match = String(raw).match(/^(-?\d+(?:\.\d+)?)(?!.*ms$)$/i);
+      if (match && !/time/i.test(key)) {
+        const bounded = Math.max(0, Math.min(10, Number(match[1])));
+        params[key] = String(Number(bounded.toFixed(1)));
+      }
+    }
+  };
+  tuneEffect(stomp, "STOMP");
+  tuneEffect(mod, "MOD");
+  tuneEffect(delay, "DELAY");
+  tuneEffect(rev, "REV");
+
+  // EQ responds to the measured spectrum rather than a single default branch.
+  const treble = parseFloat(Math.max(2.5, Math.min(9.0, 3.0 + avgTreble * 15 + (isBrightProfile ? 0.4 : 0))).toFixed(1));
+  const bass = parseFloat(Math.max(2.5, Math.min(8.5, 2.8 + avgBass * 11 - (isHeavyProfile ? 0.8 : 0))).toFixed(1));
+  const middle = parseFloat(Math.max(2.0, Math.min(8.5, 2.6 + avgMid * 8 + avgUpperMid * 3)).toFixed(1));
+  if (isLT25) {
+    // Keep bass a little tighter for the LT25's single 8-inch speaker.
+    // This is a practical starting-point adjustment, not an official Fender preset.
+    // The selected amp model remains the same across the two compatible amp libraries.
+  }
+
+  const pacTip = isSquier
+    ? `Squier CV '70s Alnico pickups; Tone 2 set to ${tonePot} based on the measured spectral balance.`
+    : `Pacifica Master Tone set to ${tonePot} based on the measured spectral balance.`;
+  const timeRangeLabel = (startSec !== null || endSec !== null)
+    ? ` [Custom Range: ${startSec !== null ? startSec + 's' : '0s'} to ${endSec !== null ? endSec + 's' : 'End'}]`
+    : "";
+
+  currentPreset = {
+    song, artist, part: currentPart,
+    presetName: `${song} [${currentPart} Dial-In]`,
+    ampModel: amp,
+    basedOn: LT_AMPS[amp]?.basedOn || "Fender DSP Model",
+    gain: parseFloat(gain.toFixed(1)),
+    treble, middle, bass, volume: 7.2,
+    stomp, mod, delay, rev,
+    pickupPos: pickup,
+    pacVol: "10.0",
+    pacTone: tonePot,
+    pacTip,
+    sourceName: sourceName + timeRangeLabel,
+    acousticData: {
+      crest: `${crestFactor.toFixed(1)} dB (estimated)`,
+      centroid: `${avgCentroid} Hz`,
+      distort: distDesc,
+      fx: delay.name !== "NONE" ? "Delay Suggested" : (mod.name !== "NONE" ? `${mod.name} Suggested` : "Dry / Minimal FX"),
+      explanation: `Measured spectrum: bass ${(avgBass * 100).toFixed(0)}%, mids ${(avgMid * 100).toFixed(0)}%, treble ${(avgTreble * 100).toFixed(0)}%; centroid ${avgCentroid} Hz. Dynamics vary ${(loudnessCv * 100).toFixed(0)}%; spectral movement ${(spectralMovement * 100).toFixed(0)}%; upper-range treble ${(p80Treble * 100).toFixed(0)}%; guitar-band energy ${(avgGuitarBandRatio * 100).toFixed(0)}%; spectral flatness ${(avgSpectralFlatness * 100).toFixed(0)}%; transient activity ${(transientActivity * 100).toFixed(0)}%. These measurements guide the suggested ${amp} preset; song mixes contain more than guitar, so treat this as a starting point.`
+    }
+  };
+
+  renderPresetUI(currentPreset, guitarType, ampType);
+}
+
+/**
+ * 6. RENDER PRESET TO DOM
+ */
+function renderPresetUI(p, guitarType, ampType = "lt40s") {
+  const isSquier = guitarType === "cv70s";
+  const isLT25 = ampType === 'lt25';
+
+  document.getElementById('presetTag').textContent = `${p.part} · ${isLT25 ? 'Mustang LT25' : 'Mustang LT40S'} Preset`;
+  document.getElementById('presetTitle').textContent = p.presetName;
+  document.getElementById('presetSubtitle').textContent = `Targeted for ${p.artist} — "${p.song}" · ${isSquier ? "Squier Classic Vibe '70s HSS" : "Yamaha Pacifica 012"}`;
+
+  // Acoustic Radar
+  document.getElementById('heardSourceTag').textContent = p.sourceName;
+  document.getElementById('heardCrest').textContent = p.acousticData.crest;
+  document.getElementById('heardCentroid').textContent = p.acousticData.centroid;
+  document.getElementById('heardDistort').textContent = p.acousticData.distort;
+  document.getElementById('heardFx').textContent = p.acousticData.fx;
+  document.getElementById('heardExplanation').textContent = p.acousticData.explanation;
+
+  // Amp Knobs
+  document.getElementById('ampModelName').textContent = p.ampModel;
+  document.getElementById('ampBasedOn').textContent = p.basedOn;
+  document.getElementById('ampHeaderBadge').textContent = isLT25 ? "LT25 PREAMP (1x8\")" : "LT40S PREAMP (STEREO 4\")";
+  document.getElementById('ampBadge').textContent = isLT25 ? "MUSTANG LT25" : "MUSTANG LT40S";
+
+  const knobs = [
+    { label: "GAIN", val: p.gain, sub: "Physical Knob" },
+    { label: "TREBLE", val: p.treble, sub: "Physical Knob" },
+    { label: "MIDDLE", val: p.middle, sub: "Display Encoder*" },
+    { label: "BASS", val: p.bass, sub: "Physical Knob" },
+    { label: "VOLUME", val: p.volume, sub: "Physical Knob" }
+  ];
+
+  document.getElementById('ampKnobsGrid').innerHTML = knobs.map(k => `
+    <div class="knob-pod">
+      <div class="k-lbl">${k.label}</div>
+      <div class="k-val">${k.val.toFixed(1)}</div>
+      <div class="k-sub">${k.sub}</div>
+    </div>
+  `).join('');
+
+  // Chain Steps
+  const chainSteps = [
+    { cat: "stomp", name: "1. STOMPBOX", data: p.stomp },
+    { cat: "mod", name: "2. MODULATION", data: p.mod },
+    { cat: "delay", name: "3. DELAY", data: p.delay },
+    { cat: "rev", name: "4. REVERB", data: p.rev }
+  ];
+
+  document.getElementById('chainContainer').innerHTML = chainSteps.map(step => {
+    const isBypassed = step.data.name === "NONE";
+    const badgeClass = isBypassed ? "bypassed" : step.cat;
+    return `
+      <div class="chain-step ${isBypassed ? 'empty' : ''}">
+        <div><span class="chain-badge ${badgeClass}">${step.name}</span></div>
+        <div class="step-details">
+          <b>${step.data.name}</b>
+          ${!isBypassed ? `
+            <div class="p-list">
+              ${Object.entries(step.data.params).map(([k,v]) => `<span class="p-chip">${k}: <b>${v}</b></span>`).join('')}
+            </div>
+            <div class="step-desc">${step.data.desc}</div>
+          ` : `<div class="step-desc" style="color:#64748b">Slot Bypassed. No effect engaged in this slot.</div>`}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Guitar Controls
+  document.getElementById('guitarCardTitle').textContent = isSquier ? "Squier Classic Vibe '70s HSS Setup" : "Yamaha Pacifica 012 Setup";
+  document.getElementById('pacPickup').textContent = p.pickupPos;
+
+  if (isSquier) {
+    document.getElementById('knobsGuitarGrid').innerHTML = `
+      <div style="background:#131822;padding:8px;border-radius:7px;border:1px solid #232d3d">
+        Master Volume: <b style="color:var(--gold);font-size:13px">${p.pacVol}</b>
+      </div>
+      <div style="background:#131822;padding:8px;border-radius:7px;border:1px solid #232d3d">
+        Tone 1 (Neck/Mid): <b style="color:var(--gold);font-size:13px">10.0 (Open)</b>
+      </div>
+      <div style="background:#131822;padding:8px;border-radius:7px;border:1px solid #232d3d;grid-column:span 2">
+        Tone 2 (Bridge Pickup): <b style="color:var(--gold);font-size:13px">${p.pacTone}</b>
+      </div>
+    `;
+  } else {
+    document.getElementById('knobsGuitarGrid').innerHTML = `
+      <div style="background:#131822;padding:8px;border-radius:7px;border:1px solid #232d3d">
+        Master Volume: <b style="color:var(--gold);font-size:13px">${p.pacVol}</b>
+      </div>
+      <div style="background:#131822;padding:8px;border-radius:7px;border:1px solid #232d3d">
+        Master Tone: <b style="color:var(--gold);font-size:13px">${p.pacTone}</b>
+      </div>
+    `;
+  }
+
+  document.getElementById('pacTip').textContent = p.pacTip;
+
+  // Bobbins
+  const isBridge = p.pickupPos.includes("Bridge") || p.pickupPos.includes("Position 1") || p.pickupPos.includes("Position 2");
+  const isMid = p.pickupPos.includes("Middle") || p.pickupPos.includes("Position 2") || p.pickupPos.includes("Position 4");
+  const isNeck = p.pickupPos.includes("Neck") || p.pickupPos.includes("Position 4") || p.pickupPos.includes("Position 5");
+
+  document.getElementById('puBridge').className = isBridge ? "pu-bobbin active" : "pu-bobbin";
+  document.getElementById('puMid').className = isMid ? "pu-bobbin active" : "pu-bobbin";
+  document.getElementById('puNeck').className = isNeck ? "pu-bobbin active" : "pu-bobbin";
+
+  // Setup Guide
+  document.getElementById('setupSteps').innerHTML = `
+    <li><b>Select Amp Model:</b> On your ${isLT25 ? 'Mustang LT25' : 'Mustang LT40S'}, press the Encoder dial &gt; scroll to Amp Model &gt; Select <b>${p.ampModel}</b>.</li>
+    <li><b>Dial Physical Knobs:</b> Turn top panel knobs: <b>GAIN: ${p.gain.toFixed(1)}</b>, <b>TREBLE: ${p.treble.toFixed(1)}</b>, <b>BASS: ${p.bass.toFixed(1)}</b>, <b>VOLUME: ${p.volume.toFixed(1)}</b>.</li>
+    <li><b>Set Internal Middle:</b> In the amp menu on the screen, set <b>MIDDLE to ${p.middle.toFixed(1)}</b>. Press BACK.</li>
+    <li><b>Configure Built-In Effects:</b>
+      ${p.stomp.name !== 'NONE' ? `Enable STOMP [${p.stomp.name}]. ` : 'STOMP bypassed. '}
+      ${p.mod.name !== 'NONE' ? `Enable MOD [${p.mod.name}]. ` : ''}
+      ${p.delay.name !== 'NONE' ? `Enable DELAY [${p.delay.name}]. ` : ''}
+      ${p.rev.name !== 'NONE' ? `Enable REVERB [${p.rev.name}].` : ''}
+    </li>
+    <li><b>Guitar Setup:</b> Set 5-way blade to <b>${p.pickupPos}</b>. ${isSquier ? 'Set Tone 2 (Bridge) to ' + p.pacTone + '.' : 'Set Master Tone to ' + p.pacTone + '.'}</li>
+  `;
+
+  document.getElementById('resultCard').style.display = "block";
+  if (window.innerWidth < 850) {
+    document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+document.getElementById('aiPlayBtn').addEventListener('click', startAiStreamAndListen);
+
+// Export Sheets
+document.getElementById('downloadTxtBtn').addEventListener('click', () => {
+  if (!currentPreset) return;
+  const p = currentPreset;
+  const content = `TONEFORGE AI-LISTENED SETUP SHEET
+Song: ${p.song} (${p.artist}) - Part: ${p.part}
+Streamed Source: ${p.sourceName}
+Heard: ${p.acousticData.distort} | Centroid: ${p.acousticData.centroid}
+Amp Model: ${p.ampModel} (${p.basedOn})
+Gain: ${p.gain} | Treble: ${p.treble} | Middle: ${p.middle} | Bass: ${p.bass} | Volume: ${p.volume}
+Stomp: ${p.stomp.name} | Mod: ${p.mod.name} | Delay: ${p.delay.name} | Reverb: ${p.rev.name}
+Pickup: ${p.pickupPos} | Tone: ${p.pacTone}`;
+  const blob = new Blob([content], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ToneForge_${p.song.replace(/\s+/g,'_')}.txt`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+document.getElementById('saveJsonBtn').addEventListener('click', () => {
+  if (!currentPreset) return;
+  const blob = new Blob([JSON.stringify(currentPreset, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ToneForge_${currentPreset.song.replace(/\s+/g,'_')}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>
