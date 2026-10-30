@@ -12,9 +12,36 @@ const norm = (s = '') => String(s).toLowerCase().normalize('NFKD').replace(/[\u0
 const timeoutSignal = () => AbortSignal.timeout(8500);
 
 async function getJson(url) {
-  const response = await fetch(url, { headers: { 'User-Agent': 'ToneForge/1.0 (music search)' }, signal: timeoutSignal() });
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'ToneForge/1.1 (music search)' },
+    signal: timeoutSignal()
+  });
   if (!response.ok) throw new Error(`Provider returned HTTP ${response.status}`);
   return response.json();
+}
+
+// Accept only ordinary Spotify track URLs. This endpoint reads public metadata;
+// it does not access, download, or bypass playback restrictions on Spotify audio.
+function isSpotifyTrackUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname === 'open.spotify.com' &&
+      /^\/track\/[A-Za-z0-9]+\/?$/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function resolveSpotifyTrack(value) {
+  if (!isSpotifyTrackUrl(value)) {
+    throw new Error('Please use a Spotify track link in the form https://open.spotify.com/track/…');
+  }
+  const endpoint = `https://open.spotify.com/oembed?url=${encodeURIComponent(value)}`;
+  const data = await getJson(endpoint);
+  const trackName = clean(data.title || '');
+  const artistName = clean(data.author_name || '');
+  if (!trackName || !artistName) throw new Error('Spotify did not return track and artist details for this link.');
+  return { trackName, artistName, artworkUrl: data.thumbnail_url || '', spotifyUrl: value };
 }
 
 function relevance(item, song, artist) {
@@ -55,8 +82,8 @@ async function searchITunes(song, artist) {
   }));
 }
 
-// Internet Archive is used only when the item metadata explicitly identifies a
-// Creative Commons or public-domain license. It is not a general-purpose song ripper.
+// Only return Archive items whose metadata explicitly identifies a Creative
+// Commons or public-domain license. This is not a general-purpose song ripper.
 async function searchArchive(song, artist) {
   const query = `mediatype:audio AND (title:"${song.replace(/["\\]/g, '')}" OR creator:"${artist.replace(/["\\]/g, '')}")`;
   const url = new URL('https://archive.org/advancedsearch.php');
@@ -97,12 +124,25 @@ async function searchArchive(song, artist) {
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'ToneForge API' }));
+
 app.get('/api/search', async (req, res) => {
-  const song = clean(req.query.song);
-  const artist = clean(req.query.artist);
+  let song = clean(req.query.song);
+  let artist = clean(req.query.artist);
   const source = ['auto', 'itunes', 'audius'].includes(req.query.source) ? req.query.source : 'auto';
-  if (!song || !artist) return res.status(400).json({ error: 'Enter both a song title and artist.' });
-  if (song.length < 1 || artist.length < 1) return res.status(400).json({ error: 'Song title and artist are required.' });
+  let spotify = null;
+
+  // A Spotify track URL may be supplied in the song field; artist is then optional.
+  if (song && isSpotifyTrackUrl(song)) {
+    try {
+      spotify = await resolveSpotifyTrack(song);
+      song = spotify.trackName;
+      artist = spotify.artistName;
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
+
+  if (!song || !artist) return res.status(400).json({ error: 'Enter both a song title and artist, or paste a Spotify track link.' });
 
   const jobs = [];
   if (source === 'auto' || source === 'audius') jobs.push(searchAudius(song, artist));
@@ -118,10 +158,21 @@ app.get('/api/search', async (req, res) => {
   }
   const ranked = [...unique.values()].sort((a,b) => relevance(b, song, artist) - relevance(a, song, artist));
   if (!ranked.length) {
-    return res.status(404).json({ error: `No playable match found for “${song}” by “${artist}”.`, message: errors.length ? `No result was found. Some catalogs were unavailable (${errors.join('; ')}). Try Auto-Select or check the spelling.` : undefined });
+    return res.status(404).json({
+      error: `No playable match found for “${song}” by “${artist}”.`,
+      message: errors.length ? `No result was found. Some catalogs were unavailable (${errors.join('; ')}). Try Auto-Select or check the spelling.` : undefined,
+      spotify
+    });
   }
   res.set('Cache-Control', 'public, max-age=60');
-  res.json({ results: ranked.slice(0, 30), providers: { checked: jobs.length, failed: errors.length }, note: 'iTunes results are previews; full-length playback depends on source availability.' });
+  res.json({
+    results: ranked.slice(0, 30),
+    providers: { checked: jobs.length, failed: errors.length },
+    spotify,
+    note: spotify
+      ? 'Spotify was used only to identify the track. Results below are playable matches from the listed catalogs; Spotify audio itself is not downloaded. iTunes results are previews.'
+      : 'iTunes results are previews; full-length playback depends on source availability.'
+  });
 });
 
 app.get('*', (req, res, next) => {

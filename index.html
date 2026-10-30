@@ -537,6 +537,8 @@ let globalAudio = null;
 let audioCtx = null;
 let analyserNode = null;
 let sourceNode = null;
+let guitarAnalysisSource = null;
+let demucsSessionPromise = null;
 let animId = null;
 
 // Oscilloscope Canvas
@@ -638,8 +640,10 @@ async function fetchStreamFromSources(song, artist, preferredSource) {
     let n = 0;
     if (title === wantedSong) n += 12;
     else if (title.includes(wantedSong) || wantedSong.includes(title)) n += 7;
-    if (performer === wantedArtist) n += 10;
-    else if (performer.includes(wantedArtist) || wantedArtist.includes(performer)) n += 5;
+    if (wantedArtist) {
+      if (performer === wantedArtist) n += 10;
+      else if (performer.includes(wantedArtist) || wantedArtist.includes(performer)) n += 5;
+    }
     if (item.isFullTrack) n += 2;
     if (item.sourceKey === 'audius') n += 1;
     if (item.previewOnly) n -= 1;
@@ -669,8 +673,9 @@ async function startAiStreamAndListen() {
 
   errBox.classList.remove('show');
 
-  if (!song || !artist) {
-    errBox.textContent = "Please enter both a Song Title and Artist for ToneForge to find and stream.";
+  const isSpotifyTrackLink = /^https:\/\/open\.spotify\.com\/track\/[A-Za-z0-9]+(?:\?.*)?$/i.test(song);
+  if (!song || (!artist && !isSpotifyTrackLink)) {
+    errBox.textContent = "Enter a song title and artist, or paste a Spotify track link in the Song Title field.";
     errBox.classList.add('show');
     return;
   }
@@ -689,6 +694,31 @@ async function startAiStreamAndListen() {
   try {
     const trackData = await fetchStreamFromSources(song, artist, streamSource);
 
+    // Auto Search guitar isolation: fetch the permitted playable stream, decode it,
+    // and run the same HT-Demucs guitar stem used by local-file analysis.
+    statusPill.innerHTML = '<span>🎸 Downloading accessible audio for guitar separation...</span>';
+    const audioResponse = await fetch(trackData.previewUrl, { mode: 'cors' });
+    if (!audioResponse.ok) throw new Error(`The audio provider returned HTTP ${audioResponse.status}; guitar isolation cannot continue.`);
+    const declaredLength = Number(audioResponse.headers.get('content-length') || 0);
+    if (declaredLength > 80 * 1024 * 1024) throw new Error('This audio source is too large for browser-based separation. Try a shorter preview or a local audio file.');
+    const audioBytes = await audioResponse.arrayBuffer();
+    if (audioBytes.byteLength > 80 * 1024 * 1024) throw new Error('This audio source is too large for browser-based separation. Try a shorter preview or a local audio file.');
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!audioCtx) audioCtx = new AudioCtx();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    statusPill.innerHTML = '<span>🎸 Decoding audio and preparing the guitar stem...</span>';
+    const decodedStream = await audioCtx.decodeAudioData(audioBytes.slice(0));
+    const effectiveStart = startSec !== null && startSec < decodedStream.duration ? startSec : 0;
+    const effectiveEnd = endSec !== null && endSec > effectiveStart
+      ? Math.min(endSec, decodedStream.duration)
+      : Math.min(decodedStream.duration, effectiveStart + 8);
+    if (effectiveEnd - effectiveStart < 1) throw new Error('The playable audio is too short for guitar separation.');
+    const guitarStem = await isolateGuitar(decodedStream, effectiveStart, effectiveEnd, statusPill);
+    const guitarBuffer = audioCtx.createBuffer(2, guitarStem[0].length, DEMUCS_SAMPLE_RATE);
+    guitarBuffer.copyToChannel(guitarStem[0], 0);
+    guitarBuffer.copyToChannel(guitarStem[1], 1);
+
     // Update Player Deck UI
     document.getElementById('deckTrackTitle').textContent = trackData.trackName;
     document.getElementById('deckArtistName').textContent = trackData.artistName;
@@ -704,18 +734,18 @@ async function startAiStreamAndListen() {
     if (trackData.allowCrossOrigin) globalAudio.crossOrigin = "anonymous";
     globalAudio.src = trackData.previewUrl;
 
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!audioCtx) audioCtx = new AudioCtx();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
-
     analyserNode = audioCtx.createAnalyser();
     analyserNode.fftSize = 2048;
     try {
+      // Keep the original recording audible, but analyze only the separated guitar.
       sourceNode = audioCtx.createMediaElementSource(globalAudio);
-      sourceNode.connect(analyserNode);
-      analyserNode.connect(audioCtx.destination);
+      sourceNode.connect(audioCtx.destination);
+      guitarAnalysisSource = audioCtx.createBufferSource();
+      guitarAnalysisSource.buffer = guitarBuffer;
+      guitarAnalysisSource.connect(analyserNode);
+      // The analyser is intentionally not connected to the speakers: no doubled audio.
     } catch (audioGraphError) {
-      console.warn('Audio analysis graph could not be connected:', audioGraphError);
+      throw new Error(`Could not connect the isolated guitar to the analyzer: ${audioGraphError.message}`);
     }
 
     // Handle Custom Start Time Seeking
@@ -733,6 +763,7 @@ async function startAiStreamAndListen() {
 
     // Start Playback
     await globalAudio.play();
+    guitarAnalysisSource.start(0);
     isAudioPlaying = true;
     deck.classList.add('playing');
 
@@ -741,7 +772,7 @@ async function startAiStreamAndListen() {
       : "";
 
     btnText.textContent = "AI IS PLAYING & LISTENING TO THE SONG...";
-    statusPill.innerHTML = `<span>🎧 Streaming: ${trackData.sourceName}${rangeNotice}</span>`;
+    statusPill.innerHTML = `<span>🎸 Playing original audio; analyzing isolated guitar from ${trackData.sourceName}${rangeNotice}</span>`;
 
     // Start Live Scope Visualizer
     const bufferLength = analyserNode.frequencyBinCount;
@@ -805,6 +836,105 @@ async function startAiStreamAndListen() {
 }
 
 /**
+ * 4. LOCAL GUITAR SOURCE SEPARATION (HT-DEMUCS 6-STEM / ONNX)
+ * Runs in the browser. The audio file itself is never uploaded; only the model
+ * weights are downloaded and cached by the browser. Guitar is stem index 4.
+ */
+const DEMUCS_SAMPLE_RATE = 44100;
+const DEMUCS_CHUNK_SAMPLES = 343980; // fixed 7.8-second model window
+const DEMUCS_MODEL_URL = 'https://huggingface.co/StemSplitio/htdemucs-6s-onnx/resolve/main/htdemucs_6s_fp16weights.onnx';
+
+async function getDemucsSession(statusPill) {
+  if (!demucsSessionPromise) {
+    demucsSessionPromise = (async () => {
+      statusPill.innerHTML = '<span>⬇️ Loading guitar-isolation model (about 136 MB, first use only)...</span>';
+      const ort = await import('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.min.mjs');
+      ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(4, navigator.hardwareConcurrency || 2)) : 1;
+      const session = await ort.InferenceSession.create(DEMUCS_MODEL_URL, {
+        executionProviders: ['wasm'],
+        graphOptimizationLevel: 'all'
+      });
+      return { ort, session };
+    })().catch(err => {
+      demucsSessionPromise = null;
+      throw err;
+    });
+  }
+  return demucsSessionPromise;
+}
+
+function audioBufferTo44100Stereo(audioBuffer, startSec, durationSec) {
+  const start = Math.max(0, Math.floor((startSec || 0) * audioBuffer.sampleRate));
+  const available = Math.max(1, audioBuffer.length - start);
+  const requested = Math.max(1, Math.floor((durationSec || 8) * DEMUCS_SAMPLE_RATE));
+  const outLength = Math.min(requested, Math.ceil(available * DEMUCS_SAMPLE_RATE / audioBuffer.sampleRate));
+  const channels = [new Float32Array(outLength), new Float32Array(outLength)];
+  const left = audioBuffer.getChannelData(0);
+  const right = audioBuffer.numberOfChannels > 1 ? audioBuffer.getChannelData(1) : left;
+  const ratio = audioBuffer.sampleRate / DEMUCS_SAMPLE_RATE;
+  for (let i = 0; i < outLength; i++) {
+    const pos = start + i * ratio;
+    const idx = Math.min(audioBuffer.length - 1, Math.floor(pos));
+    const next = Math.min(audioBuffer.length - 1, idx + 1);
+    const frac = pos - idx;
+    channels[0][i] = left[idx] + (left[next] - left[idx]) * frac;
+    channels[1][i] = right[idx] + (right[next] - right[idx]) * frac;
+  }
+  return channels;
+}
+
+async function isolateGuitar(audioBuffer, startSec, endSec, statusPill) {
+  const duration = endSec !== null && endSec > (startSec || 0)
+    ? Math.min(60, endSec - (startSec || 0))
+    : 8;
+  const mix = audioBufferTo44100Stereo(audioBuffer, startSec || 0, duration);
+  const total = mix[0].length;
+  if (total < 2048) throw new Error('The selected audio range is too short for guitar separation.');
+
+  const { ort, session } = await getDemucsSession(statusPill);
+  const overlap = Math.floor(DEMUCS_CHUNK_SAMPLES / 4);
+  const stride = DEMUCS_CHUNK_SAMPLES - overlap;
+  const outL = new Float32Array(total);
+  const outR = new Float32Array(total);
+  const weights = new Float32Array(total);
+  const window = new Float32Array(DEMUCS_CHUNK_SAMPLES);
+  for (let i = 0; i < DEMUCS_CHUNK_SAMPLES; i++) {
+    const edge = Math.min(1, (i + 1) / overlap, (DEMUCS_CHUNK_SAMPLES - i) / overlap);
+    window[i] = Math.max(0.001, edge);
+  }
+  const chunk = new Float32Array(2 * DEMUCS_CHUNK_SAMPLES);
+  const chunkCount = Math.ceil(total / stride);
+
+  for (let part = 0; part < chunkCount; part++) {
+    statusPill.innerHTML = `<span>🎸 Isolating guitar: segment ${part + 1} of ${chunkCount}...</span>`;
+    const start = part * stride;
+    const length = Math.min(DEMUCS_CHUNK_SAMPLES, total - start);
+    chunk.fill(0);
+    chunk.set(mix[0].subarray(start, start + length), 0);
+    chunk.set(mix[1].subarray(start, start + length), DEMUCS_CHUNK_SAMPLES);
+    const result = await session.run({
+      mix: new ort.Tensor('float32', chunk, [1, 2, DEMUCS_CHUNK_SAMPLES])
+    });
+    const stems = result.stems.data;
+    const guitarOffset = 4 * 2 * DEMUCS_CHUNK_SAMPLES; // [drums,bass,other,vocals,guitar,piano]
+    for (let i = 0; i < length; i++) {
+      const w = window[i];
+      outL[start + i] += stems[guitarOffset + i] * w;
+      outR[start + i] += stems[guitarOffset + DEMUCS_CHUNK_SAMPLES + i] * w;
+      weights[start + i] += w;
+    }
+    // Yield between chunks so the page can update its status and remain responsive.
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  for (let i = 0; i < total; i++) {
+    const divisor = Math.max(weights[i], 1e-6);
+    outL[i] /= divisor;
+    outR[i] /= divisor;
+  }
+  return [outL, outR];
+}
+
+/**
  * 4. DIRECT LOCAL AUDIO FILE LISTENER (100% UNRESTRICTED WEB AUDIO ACCESS)
  */
 document.getElementById('directFileInput').addEventListener('change', async (e) => {
@@ -815,16 +945,16 @@ document.getElementById('directFileInput').addEventListener('change', async (e) 
   const statusPill = document.getElementById('aiStatusPill');
   const btnText = document.getElementById('aiBtnText');
   const errBox = document.getElementById('errorMsg');
+  const playBtn = document.getElementById('aiPlayBtn');
   errBox.classList.remove('show');
+  playBtn.disabled = true;
+  btnText.textContent = 'PREPARING GUITAR ISOLATION...';
 
-  const songName = file.name.replace(/\.[^/.]+$/, "");
+  const songName = file.name.replace(/\.[^/.]+$/, '');
   document.getElementById('deckTrackTitle').textContent = file.name;
-  document.getElementById('deckArtistName').textContent = "Local Master File";
-
-  if (globalAudio) {
-    globalAudio.pause();
-    globalAudio = null;
-  }
+  document.getElementById('deckArtistName').textContent = 'Local Master File';
+  if (globalAudio) { globalAudio.pause(); globalAudio = null; }
+  if (guitarAnalysisSource) { try { guitarAnalysisSource.stop(); } catch {} guitarAnalysisSource = null; }
   if (animId) cancelAnimationFrame(animId);
 
   try {
@@ -832,72 +962,87 @@ document.getElementById('directFileInput').addEventListener('change', async (e) 
     if (!audioCtx) audioCtx = new AudioCtx();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
 
+    statusPill.innerHTML = '<span>🎸 Decoding local audio before guitar isolation...</span>';
+    const decoded = await audioCtx.decodeAudioData(await file.arrayBuffer());
+    const startSec = parseTimeString(document.getElementById('timeStart').value) || 0;
+    const enteredEnd = parseTimeString(document.getElementById('timeEnd').value);
+    const endSec = enteredEnd !== null ? Math.min(enteredEnd, decoded.duration) : null;
+    if (endSec !== null && endSec <= startSec) throw new Error('End time must be after start time.');
+
+    const guitarStem = await isolateGuitar(decoded, startSec, endSec, statusPill);
+    const guitarBuffer = audioCtx.createBuffer(2, guitarStem[0].length, DEMUCS_SAMPLE_RATE);
+    guitarBuffer.copyToChannel(guitarStem[0], 0);
+    guitarBuffer.copyToChannel(guitarStem[1], 1);
+
+    // Play the original recording, but feed only the separated guitar stem to the analyzer.
     analyserNode = audioCtx.createAnalyser();
     analyserNode.fftSize = 2048;
-
     const fileUrl = URL.createObjectURL(file);
     globalAudio = new Audio();
+    globalAudio.preload = 'auto';
     globalAudio.src = fileUrl;
-
     sourceNode = audioCtx.createMediaElementSource(globalAudio);
-    sourceNode.connect(analyserNode);
-    analyserNode.connect(audioCtx.destination);
+    sourceNode.connect(audioCtx.destination);
+    if (startSec > 0) {
+      await new Promise((resolve, reject) => {
+        globalAudio.addEventListener('loadedmetadata', resolve, { once: true });
+        globalAudio.addEventListener('error', () => reject(new Error('The original audio file could not be played.')), { once: true });
+        globalAudio.load();
+      });
+      globalAudio.currentTime = Math.min(startSec, Math.max(0, globalAudio.duration - 0.1));
+    }
 
-    const startSec = parseTimeString(document.getElementById('timeStart').value);
-    const endSec = parseTimeString(document.getElementById('timeEnd').value);
-
-    globalAudio.addEventListener('loadedmetadata', () => {
-      if (startSec !== null && startSec < globalAudio.duration) {
-        globalAudio.currentTime = startSec;
-      }
-    });
+    guitarAnalysisSource = audioCtx.createBufferSource();
+    guitarAnalysisSource.buffer = guitarBuffer;
+    guitarAnalysisSource.connect(analyserNode);
 
     await globalAudio.play();
+    guitarAnalysisSource.start();
     isAudioPlaying = true;
     deck.classList.add('playing');
-    btnText.textContent = "AI IS LISTENING TO LOCAL AUDIO FILE...";
-    statusPill.innerHTML = `<span>🎧 Reading raw physical waveform from local file: "${file.name}"</span>`;
+    btnText.textContent = 'AI IS ANALYZING THE ISOLATED GUITAR...';
+    statusPill.innerHTML = '<span>🎸 Guitar isolated locally — analyzing guitar stem (other instruments excluded as far as the model can separate them).</span>';
 
     const bufferLength = analyserNode.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
     canvas.width = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
     const collectedFftFrames = [];
+    const sampleDurationMs = guitarBuffer.duration * 1000;
 
     function renderLocalVisualizer() {
       if (!isAudioPlaying) return;
       animId = requestAnimationFrame(renderLocalVisualizer);
       analyserNode.getByteFrequencyData(dataArray);
       collectedFftFrames.push(new Uint8Array(dataArray));
-
-      canvasCtx.fillStyle = "#05070a";
+      canvasCtx.fillStyle = '#05070a';
       canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const barWidth = (canvas.width / 32);
+      const barWidth = canvas.width / 32;
       let x = 0;
-
       for (let i = 0; i < 32; i++) {
         const barHeight = (dataArray[i * 4] / 255) * canvas.height;
         canvasCtx.fillStyle = `rgb(${210 + barHeight}, ${80 + barHeight / 2}, 72)`;
         canvasCtx.fillRect(x, canvas.height - barHeight, barWidth - 2, barHeight);
         x += barWidth;
       }
-
-      if (endSec !== null && globalAudio.currentTime >= endSec) {
-        finishListeningAndDialRig(songName, "Direct File Audio", collectedFftFrames, "Direct Local File", startSec, endSec);
-      }
     }
     renderLocalVisualizer();
-
     setTimeout(() => {
       if (isAudioPlaying) {
-        finishListeningAndDialRig(songName, "Direct File Audio", collectedFftFrames, "Direct Local File", startSec, endSec);
+        finishListeningAndDialRig(songName, 'Direct File Audio — isolated guitar stem', collectedFftFrames, 'Local HT-Demucs Guitar Separation', startSec, endSec);
+        if (guitarAnalysisSource) { try { guitarAnalysisSource.stop(); } catch {} guitarAnalysisSource = null; }
       }
-    }, 6000);
-
+    }, Math.max(1500, sampleDurationMs));
   } catch (err) {
-    errBox.textContent = `Local audio error: ${err.message}`;
+    playBtn.disabled = false;
+    btnText.textContent = 'AI: FIND, STREAM & LISTEN TO SONG';
+    statusPill.innerHTML = `<span>⚠️ Guitar isolation error: ${err.message}</span>`;
+    errBox.textContent = `Guitar separation could not run: ${err.message}. Check your internet connection for the first model download, then try again. If the model cannot run in this browser, ToneForge has not analyzed the isolated guitar.`;
     errBox.classList.add('show');
+    if (globalAudio) globalAudio.pause();
+    if (guitarAnalysisSource) { try { guitarAnalysisSource.stop(); } catch {} guitarAnalysisSource = null; }
+    isAudioPlaying = false;
+    deck.classList.remove('playing');
   }
 });
 
@@ -905,6 +1050,7 @@ document.getElementById('directFileInput').addEventListener('change', async (e) 
  * 5. MAP LISTENED MEASUREMENTS TO GUITAR RIG
  */
 function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, endSec) {
+  if (guitarAnalysisSource) { try { guitarAnalysisSource.stop(); } catch {} guitarAnalysisSource = null; }
   const validFrames = (frames || []).filter(frame => frame && frame.some(value => value > 0));
   if (!validFrames.length) {
     const playBtn = document.getElementById('aiPlayBtn');
@@ -931,6 +1077,7 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
   statusPill.innerHTML = `<span>✓ Audio analyzed from: ${sourceName}</span>`;
   deck.classList.remove('playing');
   if (globalAudio) globalAudio.pause();
+  if (guitarAnalysisSource) { try { guitarAnalysisSource.stop(); } catch {} guitarAnalysisSource = null; }
   isAudioPlaying = false;
 
   // Analyze every captured FFT frame using the actual AudioContext sample rate.
@@ -940,32 +1087,57 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
   const binHz = sampleRate / fftSize;
   let bassRatioSum = 0, midRatioSum = 0, trebleRatioSum = 0;
   let centroidSum = 0, loudnessSum = 0, highMidRatioSum = 0;
+  let guitarBandRatioSum = 0, flatnessSum = 0, fluxSum = 0;
   const frameLoudness = [];
+  let previousFrame = null;
   const features = validFrames.map(frame => {
-    let bass = 0, mid = 0, treble = 0, weighted = 0, weight = 0;
-    let subBass = 0, upperMid = 0;
+    let bass = 0, mid = 0, treble = 0, weighted = 0, guitarWeight = 0, weight = 0;
+    let subBass = 0, upperMid = 0, guitarBandEnergy = 0, allBandEnergy = 0;
+    let logMagnitude = 0, arithmeticMagnitude = 0, flatnessBins = 0, positiveFlux = 0, previousEnergy = 0;
     for (let i = 1; i < frame.length; i++) {
       const value = frame[i];
       const hz = i * binHz;
-      weighted += hz * value;
       weight += value;
+      if (hz >= 20 && hz < 12000) allBandEnergy += value;
+      if (hz >= 80 && hz < 5000) {
+        guitarBandEnergy += value;
+        weighted += hz * value;
+        guitarWeight += value;
+        const magnitude = Math.max(1, value);
+        logMagnitude += Math.log(magnitude);
+        arithmeticMagnitude += magnitude;
+        flatnessBins++;
+      }
       if (hz >= 45 && hz < 250) bass += value;
       else if (hz >= 250 && hz < 2500) mid += value;
       else if (hz >= 2500 && hz < 8000) treble += value;
       if (hz >= 45 && hz < 120) subBass += value;
       if (hz >= 1200 && hz < 3500) upperMid += value;
+      if (previousFrame) {
+        positiveFlux += Math.max(0, value - previousFrame[i]);
+        previousEnergy += previousFrame[i];
+      }
     }
     const total = bass + mid + treble || 1;
     const loudness = weight / Math.max(1, frame.length / 4);
+    const flatness = flatnessBins && arithmeticMagnitude > 0
+      ? Math.exp(logMagnitude / flatnessBins) / (arithmeticMagnitude / flatnessBins) : 0;
+    const flux = previousFrame && previousEnergy > 0 ? positiveFlux / previousEnergy : 0;
     frameLoudness.push(loudness);
+    previousFrame = frame;
     return {
       bass: bass / total,
       mid: mid / total,
       treble: treble / total,
-      centroid: weight ? weighted / weight : 0,
+      // Guitar-focused band centroid reduces some cymbal/air-band bias;
+      // it does NOT isolate the guitar from a full mix.
+      centroid: guitarWeight ? weighted / guitarWeight : 0,
       loudness,
       subBass: subBass / total,
-      upperMid: upperMid / total
+      upperMid: upperMid / total,
+      guitarBandRatio: guitarBandEnergy / Math.max(1, allBandEnergy),
+      flatness,
+      flux
     };
   });
 
@@ -978,12 +1150,36 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
     highMidRatioSum += f.upperMid;
   }
   const count = features.length || 1;
+  // Robust percentiles retain short, meaningful phrases that a simple average
+  // can wash out (for example, a brief high-register lead phrase in a riff).
+  const percentile = (values, q) => {
+    const sorted = values.filter(Number.isFinite).slice().sort((a, b) => a - b);
+    if (!sorted.length) return 0;
+    const position = (sorted.length - 1) * q;
+    const lower = Math.floor(position), upper = Math.ceil(position);
+    const blend = position - lower;
+    return sorted[lower] * (1 - blend) + sorted[upper] * blend;
+  };
+  const p20Bass = percentile(features.map(f => f.bass), 0.20);
+  const p80Bass = percentile(features.map(f => f.bass), 0.80);
+  const p20Mid = percentile(features.map(f => f.mid), 0.20);
+  const p80Mid = percentile(features.map(f => f.mid), 0.80);
+  const p20Treble = percentile(features.map(f => f.treble), 0.20);
+  const p80Treble = percentile(features.map(f => f.treble), 0.80);
+  const p75Centroid = percentile(features.map(f => f.centroid), 0.75);
+  const p25Centroid = percentile(features.map(f => f.centroid), 0.25);
   const avgBass = bassRatioSum / count;
   const avgMid = midRatioSum / count;
   const avgTreble = trebleRatioSum / count;
   const avgCentroid = Math.round(centroidSum / count);
   const avgIntensity = loudnessSum / count;
   const avgUpperMid = highMidRatioSum / count;
+  const avgGuitarBandRatio = features.reduce((sum, f) => sum + f.guitarBandRatio, 0) / count;
+  const avgSpectralFlatness = features.reduce((sum, f) => sum + f.flatness, 0) / count;
+  const avgSpectralFlux = features.reduce((sum, f) => sum + f.flux, 0) / count;
+  // These are mix-character clues, not a true isolated-guitar confidence score.
+  const broadbandMix = Math.max(0, Math.min(1, (avgSpectralFlatness - 0.12) / 0.48));
+  const guitarFocus = Math.max(0, Math.min(1, (avgGuitarBandRatio - 0.28) / 0.58));
   const loudnessMean = frameLoudness.reduce((a, b) => a + b, 0) / count;
   const loudnessVariance = frameLoudness.reduce((sum, value) => sum + Math.pow(value - loudnessMean, 2), 0) / count;
   const loudnessCv = loudnessMean > 0 ? Math.sqrt(loudnessVariance) / loudnessMean : 0;
@@ -994,9 +1190,13 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
   const centroidStd = Math.sqrt(features.reduce((sum, f) => sum + Math.pow(f.centroid - meanCentroid, 2), 0) / count);
   const trebleStd = Math.sqrt(features.reduce((sum, f) => sum + Math.pow(f.treble - avgTreble, 2), 0) / count);
   const bassStd = Math.sqrt(features.reduce((sum, f) => sum + Math.pow(f.bass - avgBass, 2), 0) / count);
-  const spectralMovement = Math.min(1, centroidStd / 1800 + trebleStd * 2.2 + bassStd * 1.4);
+  const centroidRange = Math.min(1, Math.max(0, (p75Centroid - p25Centroid) / 2600));
+  const bandRange = Math.min(1, (p80Treble - p20Treble) * 1.8 + (p80Bass - p20Bass) * 1.2 + (p80Mid - p20Mid));
+  const spectralMovement = Math.min(1, centroidStd / 2200 + trebleStd * 1.8 + bassStd * 1.2 + centroidRange * 0.22 + bandRange * 0.18);
   const tonalStability = Math.max(0, 1 - spectralMovement);
   const punch = Math.max(0, Math.min(1, loudnessCv));
+  const transientActivity = Math.max(0, Math.min(1, avgSpectralFlux / 0.9));
+  const mixDensity = Math.max(0, Math.min(1, (avgIntensity - 55) / 55 * 0.55 + broadbandMix * 0.45));
 
   // Pick a tonal family from measured spectral shape + dynamics, then apply
   // the user's selected section as a useful override instead of making every
@@ -1007,9 +1207,10 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
   const isHeavyProfile = !isCleanSection && !isLeadSection &&
     ((avgTreble > 0.27 && avgUpperMid > 0.16) ||
      (avgCentroid > 3000 && avgBass > 0.23) ||
+     (p80Treble > 0.34 && p75Centroid > 3300 && avgUpperMid > 0.13) ||
      (avgIntensity > 92 && loudnessCv < 0.42) ||
      (avgBass > 0.28 && avgUpperMid > 0.17 && spectralMovement < 0.30));
-  const isBrightProfile = avgTreble > 0.31 || avgCentroid > 3400 || (avgTreble > 0.27 && centroidStd > 520);
+  const isBrightProfile = avgTreble > 0.31 || avgCentroid > 3400 || p80Treble > 0.36 || p75Centroid > 3700 || (avgTreble > 0.27 && centroidStd > 520);
   let amp, gain, stomp, mod, delay, rev, pickup, tonePot, distDesc, crestFactor;
 
   const noStomp = { name: "NONE", cat: "STOMP", params: {}, desc: "Bypassed." };
@@ -1133,10 +1334,12 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
     const darkTone = avgTreble < 0.235 || avgCentroid < 2550;
     const brightTone = avgTreble > 0.285 || avgCentroid > 3150;
     const midForward = avgUpperMid > 0.175 || (avgMid > 0.25 && avgTreble > 0.22);
-    const dynamicPerformance = loudnessCv > 0.38 || spectralMovement > 0.34;
-    const denseMix = avgIntensity > 82 && loudnessCv < 0.30 && tonalStability > 0.68;
+    const dynamicPerformance = loudnessCv > 0.38 || spectralMovement > 0.34 || transientActivity > 0.42;
+    const denseMix = (avgIntensity > 82 && loudnessCv < 0.30 && tonalStability > 0.68) || (mixDensity > 0.72 && broadbandMix > 0.52);
     const bassHeavy = avgBass > 0.30;
-    const highGainTone = isHeavyProfile || (isLeadSection && avgIntensity > 78 && bassHeavy);
+    const mixHasStrongGuitarBand = guitarFocus > 0.42;
+    const percussiveOrNoisyMix = broadbandMix > 0.68 && avgSpectralFlatness > 0.38;
+    const highGainTone = (isHeavyProfile || (isLeadSection && avgIntensity > 78 && bassHeavy)) && (!percussiveOrNoisyMix || mixHasStrongGuitarBand);
 
     // STOMP: choose among all listed Mustang LT25/LT40S stompbox models.
     if (highGainTone && denseMix) {
@@ -1147,7 +1350,7 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
       stomp = { name: "ROCK DIRT", cat: "STOMP", params: { Gain: (4.8 + avgIntensity / 40).toFixed(1), Level: "6.5", Tone: (5.0 + avgTreble * 3).toFixed(1) }, desc: "More assertive distortion for a bright, aggressive part." };
     } else if (avgBass > 0.34 && avgTreble > 0.28) {
       stomp = { name: "OCTOBOT", cat: "STOMP", params: { Octave: "4.5", Fuzz: "5.5", Level: "5.5" }, desc: "Octave-and-fuzz character for a strong low/high-frequency mix." };
-    } else if (avgIntensity < 58 || loudnessCv > 0.58) {
+    } else if (avgIntensity < 58 || loudnessCv > 0.58 || (transientActivity > 0.62 && !highGainTone)) {
       stomp = { name: "COMPRESSOR", cat: "STOMP", params: { Level: "6.5", Sensitivity: (3.8 + loudnessCv * 2).toFixed(1) }, desc: "Compression to even out a quieter or highly dynamic part." };
     } else if (avgTreble > 0.34 && avgBass < 0.22) {
       stomp = { name: "FUZZ", cat: "STOMP", params: { Gain: (5.0 + avgIntensity / 35).toFixed(1), Level: "5.8", Tone: "6.0" }, desc: "Fuzz for a bright, cutting texture." };
@@ -1197,7 +1400,7 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
 
     // REVERB: all five LT25/LT40S reverb models are available across different profiles.
     if (denseMix) {
-      rev = { name: "SMALL ROOM", cat: "REV", params: { Decay: (1.4 + avgTreble * 2).toFixed(1), Level: (1.2 + avgUpperMid * 2).toFixed(1) }, desc: "Tight room ambience for a dense mix." };
+      rev = { name: "SMALL ROOM", cat: "REV", params: { Decay: (1.4 + avgTreble * 2).toFixed(1), Level: (1.0 + avgUpperMid * 1.7).toFixed(1) }, desc: "Tight room ambience for a dense mix." };
     } else if (brightTone && dynamicPerformance) {
       rev = { name: "SPRING 65", cat: "REV", params: { Decay: (2.0 + avgTreble * 3).toFixed(1), Level: (2.0 + loudnessCv).toFixed(1) }, desc: "Classic spring-style ambience for a bright, expressive part." };
     } else if (darkTone && bassHeavy) {
@@ -1291,7 +1494,7 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
       centroid: `${avgCentroid} Hz`,
       distort: distDesc,
       fx: delay.name !== "NONE" ? "Delay Suggested" : (mod.name !== "NONE" ? `${mod.name} Suggested` : "Dry / Minimal FX"),
-      explanation: `Measured spectrum: bass ${(avgBass * 100).toFixed(0)}%, mids ${(avgMid * 100).toFixed(0)}%, treble ${(avgTreble * 100).toFixed(0)}%; centroid ${avgCentroid} Hz. Dynamics vary ${(loudnessCv * 100).toFixed(0)}%; spectral movement ${(spectralMovement * 100).toFixed(0)}%. These measurements guide the suggested ${amp} preset; song mixes contain more than guitar, so treat this as a starting point.`
+      explanation: `Measured spectrum: bass ${(avgBass * 100).toFixed(0)}%, mids ${(avgMid * 100).toFixed(0)}%, treble ${(avgTreble * 100).toFixed(0)}%; centroid ${avgCentroid} Hz. Dynamics vary ${(loudnessCv * 100).toFixed(0)}%; spectral movement ${(spectralMovement * 100).toFixed(0)}%; upper-range treble ${(p80Treble * 100).toFixed(0)}%; guitar-band energy ${(avgGuitarBandRatio * 100).toFixed(0)}%; spectral flatness ${(avgSpectralFlatness * 100).toFixed(0)}%; transient activity ${(transientActivity * 100).toFixed(0)}%. These measurements guide the suggested ${amp} preset; song mixes contain more than guitar, so treat this as a starting point.`
     }
   };
 
