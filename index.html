@@ -988,6 +988,16 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
   const loudnessVariance = frameLoudness.reduce((sum, value) => sum + Math.pow(value - loudnessMean, 2), 0) / count;
   const loudnessCv = loudnessMean > 0 ? Math.sqrt(loudnessVariance) / loudnessMean : 0;
 
+  // Extra texture measurements: frame-to-frame spectral movement and tonal stability.
+  // These help distinguish two songs with similar average EQ but different playing/mix character.
+  const meanCentroid = features.reduce((sum, f) => sum + f.centroid, 0) / count;
+  const centroidStd = Math.sqrt(features.reduce((sum, f) => sum + Math.pow(f.centroid - meanCentroid, 2), 0) / count);
+  const trebleStd = Math.sqrt(features.reduce((sum, f) => sum + Math.pow(f.treble - avgTreble, 2), 0) / count);
+  const bassStd = Math.sqrt(features.reduce((sum, f) => sum + Math.pow(f.bass - avgBass, 2), 0) / count);
+  const spectralMovement = Math.min(1, centroidStd / 1800 + trebleStd * 2.2 + bassStd * 1.4);
+  const tonalStability = Math.max(0, 1 - spectralMovement);
+  const punch = Math.max(0, Math.min(1, loudnessCv));
+
   // Pick a tonal family from measured spectral shape + dynamics, then apply
   // the user's selected section as a useful override instead of making every
   // non-clean song the same high-gain preset.
@@ -997,8 +1007,9 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
   const isHeavyProfile = !isCleanSection && !isLeadSection &&
     ((avgTreble > 0.27 && avgUpperMid > 0.16) ||
      (avgCentroid > 3000 && avgBass > 0.23) ||
-     (avgIntensity > 92 && loudnessCv < 0.42));
-  const isBrightProfile = avgTreble > 0.31 || avgCentroid > 3400;
+     (avgIntensity > 92 && loudnessCv < 0.42) ||
+     (avgBass > 0.28 && avgUpperMid > 0.17 && spectralMovement < 0.30));
+  const isBrightProfile = avgTreble > 0.31 || avgCentroid > 3400 || (avgTreble > 0.27 && centroidStd > 520);
   let amp, gain, stomp, mod, delay, rev, pickup, tonePot, distDesc, crestFactor;
 
   const noStomp = { name: "NONE", cat: "STOMP", params: {}, desc: "Bypassed." };
@@ -1121,9 +1132,9 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
   if (!isCleanSection) {
     const darkTone = avgTreble < 0.235 || avgCentroid < 2550;
     const brightTone = avgTreble > 0.285 || avgCentroid > 3150;
-    const midForward = avgUpperMid > 0.175;
-    const dynamicPerformance = loudnessCv > 0.38;
-    const denseMix = avgIntensity > 82 && loudnessCv < 0.30;
+    const midForward = avgUpperMid > 0.175 || (avgMid > 0.25 && avgTreble > 0.22);
+    const dynamicPerformance = loudnessCv > 0.38 || spectralMovement > 0.34;
+    const denseMix = avgIntensity > 82 && loudnessCv < 0.30 && tonalStability > 0.68;
     const bassHeavy = avgBass > 0.30;
     const highGainTone = isHeavyProfile || (isLeadSection && avgIntensity > 78 && bassHeavy);
 
@@ -1200,6 +1211,51 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
     }
   }
 
+  // Continuous refinement: keep the selected effect family, but tune its controls
+  // to the measured movement and dynamics instead of relying only on fixed presets.
+  const tuneEffect = (effect, category) => {
+    if (!effect || !effect.params) return;
+    const params = effect.params;
+    const movement = spectralMovement;
+    const dynamic = punch;
+    const tune = (key, value) => {
+      if (Object.prototype.hasOwnProperty.call(params, key)) params[key] = value.toFixed(1);
+    };
+    if (category === "STOMP") {
+      tune("Gain", Math.min(7.5, Math.max(0.8, (parseFloat(params.Gain) || 2.5) + (avgIntensity > 85 ? 0.5 : -0.2) + avgUpperMid * 1.2)));
+      tune("Level", Math.min(9.5, Math.max(2, (parseFloat(params.Level) || 5.5) + (dynamic > 0.45 ? -0.4 : 0.2))));
+      tune("Tone", Math.min(9, Math.max(1, (parseFloat(params.Tone) || 5) + (avgTreble - 0.27) * 5)));
+      tune("Sensitivity", Math.min(9, Math.max(1, (parseFloat(params.Sensitivity) || 4) + dynamic * 1.2)));
+      tune("Threshold", Math.min(9, Math.max(1, (parseFloat(params.Threshold) || 4) + (avgIntensity - 70) / 35)));
+      tune("Sustain", Math.min(9, Math.max(1, (parseFloat(params.Sustain) || 5) + dynamic * 1.1)));
+      tune("Fuzz", Math.min(9, Math.max(1, (parseFloat(params.Fuzz) || 5) + (avgBass - 0.25) * 5)));
+      tune("Octave", Math.min(9, Math.max(1, (parseFloat(params.Octave) || 4.5) + (avgBass - 0.25) * 3)));
+    } else if (category === "MOD") {
+      tune("Rate", Math.min(8, Math.max(0.5, (parseFloat(params.Rate) || 2) + movement * 1.2)));
+      tune("Depth", Math.min(8, Math.max(0.5, (parseFloat(params.Depth) || 3) + movement * 1.4 - tonalStability * 0.4)));
+      tune("Level", Math.min(7, Math.max(0.5, (parseFloat(params.Level) || 2.5) + movement * 0.5)));
+      tune("Sensitivity", Math.min(8, Math.max(1, (parseFloat(params.Sensitivity) || 4) + dynamic * 1.1)));
+    } else if (category === "DELAY") {
+      tune("Feedback", Math.min(6, Math.max(0.5, (parseFloat(params.Feedback) || 2) + (isLeadSection ? 0.3 : 0) - (avgIntensity > 85 ? 0.4 : 0))));
+      tune("Level", Math.min(5, Math.max(0.5, (parseFloat(params.Level) || 2) + (isLeadSection ? 0.3 : 0) - movement * 0.4)));
+    } else if (category === "REV") {
+      tune("Decay", Math.min(8, Math.max(0.5, (parseFloat(params.Decay) || 2) + (isLeadSection ? 0.25 : 0) - (avgIntensity > 85 ? 0.35 : 0))));
+      tune("Level", Math.min(5, Math.max(0.5, (parseFloat(params.Level) || 2) + (tonalStability * 0.25) - (avgIntensity > 85 ? 0.35 : 0))));
+    }
+    // Every numeric effect control is constrained to the amp's 0–10 scale.
+    for (const [key, raw] of Object.entries(params)) {
+      const match = String(raw).match(/^(-?\d+(?:\.\d+)?)(?!.*ms$)$/i);
+      if (match && !/time/i.test(key)) {
+        const bounded = Math.max(0, Math.min(10, Number(match[1])));
+        params[key] = String(Number(bounded.toFixed(1)));
+      }
+    }
+  };
+  tuneEffect(stomp, "STOMP");
+  tuneEffect(mod, "MOD");
+  tuneEffect(delay, "DELAY");
+  tuneEffect(rev, "REV");
+
   // EQ responds to the measured spectrum rather than a single default branch.
   const treble = parseFloat(Math.max(2.5, Math.min(9.0, 3.0 + avgTreble * 15 + (isBrightProfile ? 0.4 : 0))).toFixed(1));
   const bass = parseFloat(Math.max(2.5, Math.min(8.5, 2.8 + avgBass * 11 - (isHeavyProfile ? 0.8 : 0))).toFixed(1));
@@ -1235,7 +1291,7 @@ function finishListeningAndDialRig(song, artist, frames, sourceName, startSec, e
       centroid: `${avgCentroid} Hz`,
       distort: distDesc,
       fx: delay.name !== "NONE" ? "Delay Suggested" : (mod.name !== "NONE" ? `${mod.name} Suggested` : "Dry / Minimal FX"),
-      explanation: `Measured spectrum: bass ${(avgBass * 100).toFixed(0)}%, mids ${(avgMid * 100).toFixed(0)}%, treble ${(avgTreble * 100).toFixed(0)}%; centroid ${avgCentroid} Hz. Dynamics vary ${(loudnessCv * 100).toFixed(0)}% across captured frames. These measurements guide the suggested ${amp} preset; song mixes contain more than guitar, so treat this as a starting point.`
+      explanation: `Measured spectrum: bass ${(avgBass * 100).toFixed(0)}%, mids ${(avgMid * 100).toFixed(0)}%, treble ${(avgTreble * 100).toFixed(0)}%; centroid ${avgCentroid} Hz. Dynamics vary ${(loudnessCv * 100).toFixed(0)}%; spectral movement ${(spectralMovement * 100).toFixed(0)}%. These measurements guide the suggested ${amp} preset; song mixes contain more than guitar, so treat this as a starting point.`
     }
   };
 
