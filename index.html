@@ -671,6 +671,21 @@ async function startAiStreamAndListen() {
 
   errBox.classList.remove('show');
 
+  // Create/resume Web Audio while the user's button click is still active.
+  // The streaming path previously used audioCtx without initializing it.
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) throw new Error('Web Audio is not supported by this browser.');
+    if (!audioCtx) audioCtx = new AudioCtx();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+  } catch (audioContextError) {
+    errBox.textContent = `Audio analysis could not start: ${audioContextError.message}`;
+    errBox.classList.add('show');
+    playBtn.disabled = false;
+    btnText.textContent = 'ANALYZE AUDIO';
+    return;
+  }
+
   const isSpotifyTrackLink = /^https:\/\/open\.spotify\.com\/track\/[A-Za-z0-9]+(?:\?.*)?$/i.test(song);
   if (!song || (!artist && !isSpotifyTrackLink)) {
     errBox.textContent = "Enter a song title and artist, or paste a Spotify track link in the Song Title field.";
@@ -707,6 +722,7 @@ async function startAiStreamAndListen() {
     if (trackData.allowCrossOrigin) globalAudio.crossOrigin = "anonymous";
     globalAudio.src = trackData.previewUrl;
 
+    if (!audioCtx) throw new Error('AudioContext was not initialized.');
     analyserNode = audioCtx.createAnalyser();
     analyserNode.fftSize = 2048;
     try {
