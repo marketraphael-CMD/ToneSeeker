@@ -1,5 +1,7 @@
 const express = require('express');
 const path = require('path');
+const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -9,16 +11,86 @@ app.use(express.static(ROOT, { extensions: ['html'] }));
 
 const clean = (s = '') => String(s).replace(/[<>\u0000-\u001f]/g, ' ').trim().slice(0, 180);
 const norm = (s = '') => String(s).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-const timeoutSignal = () => AbortSignal.timeout(8500);
+const timeoutSignal = () => AbortSignal.timeout(20000);
 
 async function getJson(url) {
   const response = await fetch(url, {
-    headers: { 'User-Agent': 'ToneForge/1.1 (music search)' },
+    headers: { 'User-Agent': 'ToneForge/1.2 (music search)' },
     signal: timeoutSignal()
   });
   if (!response.ok) throw new Error(`Provider returned HTTP ${response.status}`);
   return response.json();
 }
+
+// Only catalog hosts used by ToneForge are accepted. Redirects are checked at
+// every hop, preventing this endpoint from becoming an arbitrary URL proxy.
+function allowedAudioHost(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  return host === 'discoveryprovider.audius.co' ||
+    host === 'audio-ssl.itunes.apple.com' ||
+    host === 'archive.org' || host.endsWith('.archive.org') ||
+    host.endsWith('.cloudfront.net') || host.endsWith('.audius.co');
+}
+
+function validateAudioUrl(value) {
+  let url;
+  try { url = new URL(value); } catch { throw new Error('Invalid audio source URL.'); }
+  if (url.protocol !== 'https:' || url.username || url.password || !allowedAudioHost(url.hostname)) {
+    throw new Error('This audio provider is not permitted.');
+  }
+  return url;
+}
+
+async function fetchAudioFollowingAllowedRedirects(value, headers) {
+  let url = validateAudioUrl(value);
+  for (let redirects = 0; redirects <= 5; redirects++) {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+      redirect: 'manual',
+      signal: timeoutSignal()
+    });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get('location');
+      if (!location || redirects === 5) throw new Error('Audio provider redirected too many times.');
+      url = validateAudioUrl(new URL(location, url).toString());
+      // Discard any redirect response body before following the next hop.
+      await response.body?.cancel().catch(() => {});
+      continue;
+    }
+    return response;
+  }
+  throw new Error('Could not reach the audio provider.');
+}
+
+// Browser -> same-origin API -> approved catalog host. Forward Range so the
+// HTML audio element can seek and begin playback without downloading the file.
+app.get('/api/stream', async (req, res) => {
+  try {
+    const source = validateAudioUrl(req.query.url);
+    const requestHeaders = { 'User-Agent': 'ToneForge/1.2 (audio playback)' };
+    if (req.headers.range) requestHeaders.Range = req.headers.range;
+    const upstream = await fetchAudioFollowingAllowedRedirects(source.toString(), requestHeaders);
+    if (!upstream.ok && upstream.status !== 206) {
+      await upstream.body?.cancel().catch(() => {});
+      return res.status(upstream.status).json({ error: `Audio provider returned HTTP ${upstream.status}.` });
+    }
+
+    res.status(upstream.status);
+    const passHeaders = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag'];
+    for (const name of passHeaders) {
+      const value = upstream.headers.get(name);
+      if (value) res.set(name, value);
+    }
+    res.set('Cache-Control', 'no-store');
+    res.set('X-Content-Type-Options', 'nosniff');
+    if (!upstream.body) return res.end();
+    await pipeline(Readable.fromWeb(upstream.body), res);
+  } catch (error) {
+    if (res.headersSent) return res.destroy(error);
+    res.status(502).json({ error: error.message || 'Unable to stream audio from this provider.' });
+  }
+});
 
 // Accept only ordinary Spotify track URLs. This endpoint reads public metadata;
 // it does not access, download, or bypass playback restrictions on Spotify audio.
@@ -27,15 +99,11 @@ function isSpotifyTrackUrl(value) {
     const url = new URL(value);
     return url.protocol === 'https:' && url.hostname === 'open.spotify.com' &&
       /^\/track\/[A-Za-z0-9]+\/?$/.test(url.pathname);
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 async function resolveSpotifyTrack(value) {
-  if (!isSpotifyTrackUrl(value)) {
-    throw new Error('Please use a Spotify track link in the form https://open.spotify.com/track/…');
-  }
+  if (!isSpotifyTrackUrl(value)) throw new Error('Please use a Spotify track link in the form https://open.spotify.com/track/…');
   const endpoint = `https://open.spotify.com/oembed?url=${encodeURIComponent(value)}`;
   const data = await getJson(endpoint);
   const trackName = clean(data.title || '');
@@ -82,8 +150,6 @@ async function searchITunes(song, artist) {
   }));
 }
 
-// Only return Archive items whose metadata explicitly identifies a Creative
-// Commons or public-domain license. This is not a general-purpose song ripper.
 async function searchArchive(song, artist) {
   const query = `mediatype:audio AND (title:"${song.replace(/["\\]/g, '')}" OR creator:"${artist.replace(/["\\]/g, '')}")`;
   const url = new URL('https://archive.org/advancedsearch.php');
@@ -130,18 +196,13 @@ app.get('/api/search', async (req, res) => {
   let artist = clean(req.query.artist);
   const source = ['auto', 'itunes', 'audius'].includes(req.query.source) ? req.query.source : 'auto';
   let spotify = null;
-
-  // A Spotify track URL may be supplied in the song field; artist is then optional.
   if (song && isSpotifyTrackUrl(song)) {
     try {
       spotify = await resolveSpotifyTrack(song);
       song = spotify.trackName;
       artist = spotify.artistName;
-    } catch (error) {
-      return res.status(400).json({ error: error.message });
-    }
+    } catch (error) { return res.status(400).json({ error: error.message }); }
   }
-
   if (!song || !artist) return res.status(400).json({ error: 'Enter both a song title and artist, or paste a Spotify track link.' });
 
   const jobs = [];
@@ -164,9 +225,16 @@ app.get('/api/search', async (req, res) => {
       spotify
     });
   }
+
+  // Convert provider audio URLs to same-origin URLs so browser playback and
+  // Web Audio analysis no longer depend on third-party CORS permissions.
+  const proxied = ranked.slice(0, 30).map(track => ({
+    ...track,
+    previewUrl: `/api/stream?url=${encodeURIComponent(track.previewUrl)}`
+  }));
   res.set('Cache-Control', 'public, max-age=60');
   res.json({
-    results: ranked.slice(0, 30),
+    results: proxied,
     providers: { checked: jobs.length, failed: errors.length },
     spotify,
     note: spotify

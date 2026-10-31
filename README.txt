@@ -1,5 +1,13 @@
-ToneForge combined update
+ToneForge same-origin audio proxy update
 
-Replace index.html, server.js, and package.json in your repository. Keep your existing environment settings private. The app uses Spotify only for public track metadata; playable audio is searched from Audius, iTunes previews, and explicitly licensed Internet Archive files. Auto Search now fetches the selected playable audio in the browser, runs HT-Demucs guitar separation, plays the original track, and analyzes only the separated guitar stem.
+Replace index.html, server.js, and package.json in your repository with these files.
+The visible UI is unchanged. The API now proxies approved Audius, iTunes, and Internet Archive audio through /api/stream, forwarding HTTP Range requests and validating redirect hosts.
 
-Important: browser separation requires the selected audio host to allow CORS. If it blocks browser access, ToneForge reports an error instead of analyzing the full mix. The first model load is approximately 136 MB and uses around 1.1 GB RAM.
+Requirements: Node.js 20+ and npm install. Deploy/restart the app after committing.
+
+Spotify is still used only for public track metadata; this does not download Spotify audio. Custom direct audio URLs still use the browser's direct playback path and may be subject to the host's CORS/media policies.
+
+Check after deployment:
+  GET /api/health
+Expected: {"ok":true,"service":"ToneForge API"}
+Then test a catalog search and playback. A successful health check alone does not prove each provider has playable audio.
