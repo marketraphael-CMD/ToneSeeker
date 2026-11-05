@@ -281,6 +281,42 @@ body{
 .error-msg.show{display:block}
 .btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
 .footer{color:#7f8999;font-size:11px;line-height:1.6;margin-top:24px}
+/* SECRET CHRISTMAS THEME — activated only by the tiny Santa hat */
+#santaHatToggle{
+  appearance:none;border:1px solid #596273;background:#111722;color:#fff;
+  border-radius:999px;width:32px;height:32px;padding:0;display:inline-flex;
+  align-items:center;justify-content:center;font-size:17px;cursor:pointer;
+  opacity:.72;transition:opacity .2s,transform .2s,border-color .2s;
+}
+#santaHatToggle:hover,#santaHatToggle:focus-visible{opacity:1;transform:rotate(-12deg) scale(1.08);border-color:var(--gold);outline:none}
+.top{position:relative}
+body.christmas-theme{
+  --bg:#07130f;--panel:#10251d;--panel2:#163328;--line:#28513e;
+  --text:#f4f7ef;--muted:#b4c8b9;--red:#e34b52;--red-hover:#c93640;
+  --gold:#f3cf78;--green:#8ee0ad;--blue:#8cc9ef;--purple:#d6a2df;
+  background:radial-gradient(ellipse at top right,#263c2d 0,#07130f 52%);
+}
+body.christmas-theme .gear-card,body.christmas-theme .card{background:linear-gradient(145deg,#193a2b,#10251d);border-color:#315b43}
+body.christmas-theme .ai-player-deck{background:#091b14;border-color:#315b43}
+body.christmas-theme .ai-player-deck.playing{border-color:#e34b52;box-shadow:0 0 20px rgba(227,75,82,.25)}
+body.christmas-theme .preset-hero{background:linear-gradient(135deg,#1b3a2b,#12271d);border-color:#426548}
+body.christmas-theme .heard-card{background:#10251d;border-color:#426548}
+body.christmas-theme .heard-metric{background:#193328;border-color:#31513e}
+body.christmas-theme .part{background:#10251d;border-color:#31513e}
+body.christmas-theme .part.active{background:#4a2026;border-color:#e34b52}
+body.christmas-theme .btn-ai-play{background:linear-gradient(135deg,#258653,#17613d)}
+body.christmas-theme .btn-ai-play:hover{filter:brightness(1.12)}
+body.christmas-theme .field input,body.christmas-theme .field select,body.christmas-theme .gear-select{background:#0a1b14;border-color:#31513e}
+body.christmas-theme #scopeCanvas{background:#06110c;border-color:#244632}
+body.christmas-theme #santaHatToggle{background:#173b2a;border-color:#e34b52;opacity:1}
+body.christmas-theme .badge{border-color:#52714e;color:#f3cf78}
+body.christmas-theme .pill{border-color:#426548}
+body.christmas-theme .footer{color:#9bb6a1}
+body.christmas-theme::before{
+  content:'❄  ✦  ❄';position:fixed;top:8px;left:50%;transform:translateX(-50%);
+  color:rgba(235,247,235,.34);font-size:12px;letter-spacing:18px;
+  pointer-events:none;z-index:5;white-space:nowrap
+}
 @media(max-width:850px){.grid{grid-template-columns:1fr}.knobs-grid{grid-template-columns:repeat(3,1fr)}.heard-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
@@ -288,7 +324,10 @@ body{
 <div class="wrap">
   <header class="top">
     <div class="brand">TONE<span>FORGE</span> <span style="color:#7e8797;font-size:10px;letter-spacing:.04em">AUDIO STREAM LISTENER</span></div>
-    <div class="badge" id="calcCounterBadge">🌐 STREAM FINDER READY</div>
+    <div style="display:flex;align-items:center;gap:9px">
+      <button id="santaHatToggle" type="button" aria-label="Toggle secret Christmas theme" aria-pressed="false" title="A little holiday secret">🎅</button>
+      <div class="badge" id="calcCounterBadge">🌐 STREAM FINDER READY</div>
+    </div>
   </header>
 
   <section class="hero">
@@ -1514,6 +1553,14 @@ Pickup: ${p.pickupPos} | Tone: ${p.pacTone}`;
   a.download = `ToneForge_${p.song.replace(/\s+/g,'_')}.txt`;
   a.click();
   URL.revokeObjectURL(a.href);
+});
+
+// Secret Santa hat: toggles the seasonal palette without changing the layout.
+const santaHatToggle = document.getElementById('santaHatToggle');
+santaHatToggle.addEventListener('click', () => {
+  const enabled = document.body.classList.toggle('christmas-theme');
+  santaHatToggle.setAttribute('aria-pressed', String(enabled));
+  santaHatToggle.title = enabled ? 'Christmas mode is on — click to turn it off' : 'A little holiday secret';
 });
 
 document.getElementById('saveJsonBtn').addEventListener('click', () => {
